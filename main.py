@@ -1,6 +1,5 @@
 import openai
 import os
-import json
 import requests
 from halo import Halo
 
@@ -49,9 +48,7 @@ def get_model_context_size(model):
 
         # Print key model stats.
         print("Model Stats:")
-        print(f"  Name: {chosen.get('name')}")
-        print(f"  Model: {chosen.get('model')}")
-        print(f"  Modified At: {chosen.get('modified_at')}")                
+        print(f"  Name: {chosen.get('name')}  Model: {chosen.get('model')}")
         print("  Details:")
         details = chosen.get('details', {})
         for key, value in details.items():
@@ -63,7 +60,6 @@ def get_model_context_size(model):
     except requests.RequestException:
         print_colored("Warning: Could not retrieve context size from Ollama. Returning unknown (-1).", YELLOW)
         return -1
-
 
 
 def talk_to_ollama(prompt, model, system_prompt=None, color=RED, context_size_override=None):
@@ -80,15 +76,14 @@ def talk_to_ollama(prompt, model, system_prompt=None, color=RED, context_size_ov
     )
 
     try:
-        # Use the override for display if provided; otherwise, fetch from Ollama.
-        if context_size_override is not None:
-            display_context_size = context_size_override
-        else:
-            display_context_size = get_model_context_size(model)
+        # Use the override for display if provided; otherwise, (won't happen in this flow)
+        display_context_size = context_size_override if context_size_override is not None else -1
 
-        context_str = str(display_context_size) if display_context_size != -1 else "UNKNOWN"
-        spinner = Halo(text=f'Waiting for response from {model} (context: {context_str})...', spinner='dots',
-                       color='yellow')
+        spinner = Halo(
+            text=f'Waiting for response from {model} (context: {display_context_size})...',
+            spinner='dots',
+            color='yellow'
+        )
         spinner.start()
 
         # Build the message list, including system prompt if available.
@@ -144,10 +139,16 @@ def load_prompt_from_file(filename):
 
 # Main execution
 if __name__ == "__main__":
-    # Set this variable to an integer (e.g., 8192) if you have created a custom model with that context size.
-    # Otherwise, leave it as None to use the model's default context size.
-    OVERRIDE_CONTEXT_SIZE = None
+    model = 'llama3.1'
 
+    # First, get and display the model stats. COMMENT THIS OUT IF YOU WANT :)
+    print("Getting Model Stats:")
+    model_context_size = get_model_context_size(model)
+    if model_context_size == -1:
+        model_context_size = 'UNKNOWN' # Hell yeah we're mixing string and ints. let's do it!
+    print()  # Blank line for readability
+
+    # Load the prompt and system prompt.
     user_prompt = load_prompt_from_file("prompt.txt")
     system_prompt = load_prompt_from_file("system_prompt.txt")
 
@@ -158,7 +159,8 @@ if __name__ == "__main__":
     else:
         q = input("Enter your question: ")
 
-    print(f"\nQUESTION: {q}")
+    # Display the question.
+    print(f"\nQUESTION: {q}\n")
 
     try:
         import halo
@@ -166,6 +168,5 @@ if __name__ == "__main__":
         print_colored("\nNOTE: This script requires the 'halo' package. Install it with:", YELLOW)
         print_colored("pip install halo", CYAN)
 
-    # If you want Ollama to use a custom context size, ensure you've created a model with that context size.
-    # The OVERRIDE_CONTEXT_SIZE is used here only for display purposes.
-    r1 = talk_to_ollama(q, 'llama3.1', system_prompt, RED, context_size_override=OVERRIDE_CONTEXT_SIZE)
+    # Pass the already-obtained model_context_size to avoid querying again.
+    r1 = talk_to_ollama(q, model, system_prompt, RED, model_context_size)
