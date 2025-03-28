@@ -1,37 +1,79 @@
-# SimpleAITestbed
-Most basic testbed for streaming responses from Ollama or OpenAI and prompts from file.
+# AI Model Conversation Tool
 
-## Installation via Pycharm
-* Open Pycharm, Open and point to SimpleAITestBed
-* Pycharm should offer to install dependencies from Requirements.txt and setup venv
-* Select main.py and  Click run after project fully loads.
+A simple yet powerful Python utility for interacting with multiple AI language models through a consistent interface.
 
-## Installation (manual)
-Install requirements.txt using pip:
-> pip install -r requirements.txt
+## Features
 
-Otherwise, install requirements manually in your favorite IDE using pip or IDE methods
+- **Multi-model support**: Talk to Claude, OpenAI, and Ollama models with the same code structure
+- **Conversation history tracking**: Maintain context within each model conversation
+- **Streaming responses**: See responses as they're generated
+- **Thinking mode support**: See Claude's thinking process (Claude 3.7+ only)
+- **Class-based architecture**: Consistent, maintainable code structure
+
+## Requirements
+
+- Python 3.7+
+- Required packages: `openai`, `anthropic`, `requests`, `halo`
+
+## Installation
+
+1. Clone this repository
+2. Install dependencies:
+```bash
+pip install openai anthropic requests halo
+```
+3. Create an `apikeys.json` file with your API keys:
+```json
+{
+  "anthropic": "your-anthropic-key",
+  "openai": "your-openai-key"
+}
+```
+4. For Ollama, ensure you have it running locally at the default URL.
 
 ## Usage
-Add your prompt to prompt.txt or leave prompt.txt empty and add prompt manually
 
-## Setting the context size
+### Basic Usage
 
-The OpenAI API does not have a way of setting the context size for a model. If you need to change the context size, create a `Modelfile` which looks like:
+```python
+# Initialize key manager
+key_manager = APIKeyManager("apikeys.json")
+    
+claude = ClaudeConversation(key_manager.get_key("anthropic")) 
+openai_chat = OpenAIConversation(key_manager.get_key("openai"))
+ollama = OllamaConversation(model="llama3.1")
 
+# Ask questions
+claude.ask_with_thinking("What are three interesting facts about quantum computing?")
+openai_chat.ask("Write a short poem about programming.")
+ollama.ask("Explain how transformers work in machine learning.", system_prompt="Be concise and clear.")
 ```
-FROM <some model>
-PARAMETER num_ctx <context size>
-```
 
-Use the `ollama create mymodel` command to create a new model with the updated context size. Call the API with the updated model name.
+### Working with Files
 
-# Features :D
-* Streaming responses
-* Configurable System and User Prompt from file
+To use prompt files instead of direct input:
 
+1. Create a `prompt.txt` file with your question
+2. Create a `system_prompt.txt` file with your system prompt (for Ollama and OpenAI)
+3. Run the script.
 
-## Example Running
-Outputs model info for debug purposes. Can be commented out.
-<img width="996" alt="image" src="https://github.com/user-attachments/assets/91a1a463-0800-49b0-ba75-3d5fb6661fdb" />
+## Class Overview
 
+- `APIKeyManager`: Handles loading, storage, and retrieval of API keys
+- `ClaudeConversation`: Interface for Claude models with thinking mode support
+- `OpenAIConversation`: Interface for OpenAI GPT models
+- `OllamaConversation`: Interface for locally-run Ollama models
+
+## Customization
+
+- Change the default model by modifying the model field in each class
+- Adjust output colors by changing the ANSI color constants
+- Modify context sizes for different performance characteristics
+
+## License
+
+MIT
+
+## Contributing
+
+Contributions welcome! Please feel free to submit a Pull Request.
