@@ -5,6 +5,7 @@ import requests
 from halo import Halo
 import json
 from pathlib import Path
+import google.generativeai as genai
 
 # ANSI escape codes for some colors
 RED = "\033[31m"
@@ -15,6 +16,71 @@ MAGENTA = "\033[35m"
 CYAN = "\033[36m"
 RESET = "\033[0m"  # Resets the color to default
 
+# gemini-2.5-pro-exp-03-25
+# gemini-2.0-flash-lite (fast and cheap)
+# o3-mini
+# gpt-4o
+# o1
+# claude-3-5-haiku-latest (small and fast)
+
+# Model configurations
+MODEL_CONFIGS = {
+    # OpenAI models
+    "gpt-4o": {
+        "max_tokens": 16384,
+        "supports_reasoning": False,
+    },
+    "o3-mini": {
+        "max_tokens": 60000,
+        "supports_reasoning": True,
+    },
+    "o1": {
+        "max_tokens": 60000,
+        "supports_reasoning": False,
+    },
+    # Claude models
+    "claude-3-7-sonnet-latest": {
+        "max_tokens": 30720,
+        "thinking_enabled": True,
+        "thinking_budget": 32000,
+        "max_tokens_with_thinking": 128000,
+    },
+    "claude-3-5-haiku-latest": {
+        "max_tokens": 50000,
+        "thinking_enabled": False,
+    },
+    # Gemini models
+    "gemini-2.0-pro-exp-02-05": {
+        "max_tokens": 65636,
+    },
+    "gemini-2.0-flash": {
+        "max_tokens": 8192,
+    },
+    "gemini-2.0-flash-lite": {
+        "max_tokens": 8192,
+    },
+    "gemini-2.0-pro": {
+        "max_tokens": 16384,
+    },
+    # Ollama models
+    "llama3.1": {
+        "max_tokens": 4096,
+    },
+    "gemma3": {
+        "max_tokens": 4096,
+    },
+}
+
+# Default configuration to use when model isn't found
+DEFAULT_CONFIG = {
+    "max_tokens": 4096,
+    "supports_reasoning": False,
+    "thinking_enabled": False,
+}
+
+def get_model_config(model_name):
+    """Get the configuration for a specific model, with fallback to defaults"""
+    return MODEL_CONFIGS.get(model_name, DEFAULT_CONFIG)
 
 class APIKeyManager:
     """Manages API keys for different providers"""
@@ -96,28 +162,43 @@ class APIKeyManager:
             print(f"Error saving API keys: {e}")
             return False
 
+
 class ClaudeConversation:
-    def __init__(self, api_key):
+    def __init__(self, api_key, color=None):
         """Initialize a Claude conversation with the provided API key"""
         self.client = anthropic.Anthropic(api_key=api_key)
         self.conversation_history = []
         self.model = "claude-3-7-sonnet-latest"
+        self.color = color
 
-    def ask_with_thinking(self, prompt, model=None, max_tokens=60000, thinking_budget=32000):
+    def ask_with_thinking(self, prompt, model=None, max_tokens=None, thinking_budget=None):
         """
         Send a message to Claude with thinking enabled, stream the response, and update conversation history.
 
         Args:
             prompt (str): The prompt to send to Claude
             model (str, optional): Model to use. Defaults to the instance's model.
-            max_tokens (int, optional): Maximum tokens in the response. Defaults to 60000.
-            thinking_budget (int, optional): Budget for thinking. Defaults to 32000.
+            max_tokens (int, optional): Maximum tokens in the response. Defaults to model's config.
+            thinking_budget (int, optional): Budget for thinking. Defaults to model's config.
 
         Returns:
             dict: The complete response from Claude
         """
         if model is None:
             model = self.model
+
+        # Get model configuration
+        config = get_model_config(model)
+
+        # Use provided values or fall back to config
+        if max_tokens is None:
+            if config.get("thinking_enabled", False):
+                max_tokens = config.get("max_tokens_with_thinking", 30720)
+            else:
+                max_tokens = config.get("max_tokens", 30720)
+
+        if thinking_budget is None:
+            thinking_budget = config.get("thinking_budget", 32000)
 
         # Create messages array with conversation history plus new prompt
         messages = self.conversation_history + [
@@ -130,15 +211,22 @@ class ClaudeConversation:
         response_started = False
         full_response = ""
 
-        with self.client.beta.messages.stream(
-                model=model,
-                max_tokens=max_tokens,
-                thinking={
+        # Only enable thinking if the model supports it
+        thinking_params = {}
+        if config.get("thinking_enabled", False):
+            thinking_params = {
+                "thinking": {
                     "type": "enabled",
                     "budget_tokens": thinking_budget
                 },
+                "betas": ["output-128k-2025-02-19"]
+            }
+
+        with self.client.beta.messages.stream(
+                model=model,
+                max_tokens=max_tokens,
                 messages=messages,
-                betas=["output-128k-2025-02-19"],
+                **thinking_params
         ) as stream:
             for event in stream:
                 if event.type == "content_block_start":
@@ -161,7 +249,7 @@ class ClaudeConversation:
                             response_started = True
 
                         # Stream response content directly
-                        print(event.delta.text, end="", flush=True)
+                        print_colored(event.delta.text, self.color)
                         # Also accumulate for conversation history
                         full_response += event.delta.text
 
@@ -194,40 +282,39 @@ class ClaudeConversation:
         """Return the current conversation history"""
         return self.conversation_history
 
+
 class OpenAIConversation:
-    def __init__(self, api_key=None, key_file=None):
+    def __init__(self, api_key=None, model="o3-mini", reasoning_effort=None, color=None):
         """
         Initialize an OpenAI conversation
 
         Args:
-            api_key (str, optional): OpenAI API key
-            key_file (str, optional): Path to a JSON file containing API keys
+            api_key (str, required): OpenAI API key
+            model (str, optional): Default model to use
+            reasoning_effort (str, optional): Reasoning effort setting
+            color (str, optional): Color for output
         """
-        self.key_manager = APIKeyManager(key_file)
-
-        # Set API key from parameter or file
-        if api_key:
-            self.key_manager.set_key('openai', api_key)
 
         # Initialize client if we have a key
-        openai_key = self.key_manager.get_key('openai')
-        if openai_key:
-            self.client = openai.OpenAI(api_key=openai_key)
+        if api_key:
+            self.client = openai.OpenAI(api_key=api_key)
         else:
             self.client = None
-            print("Warning: No OpenAI API key provided. Please set a key before making requests.")
+            print("ERROR: No OpenAI API key provided. Please set a key before making requests.")
 
         self.conversation_history = []
-        self.model = "gpt-4-turbo"
+        self.model = model
+        self.color = color
+        self.reasoning_effort = reasoning_effort
 
-    def ask(self, prompt, model=None, max_tokens=4000):
+    def ask(self, prompt, model=None, max_tokens=None):
         """
         Send a message to OpenAI and update conversation history
 
         Args:
             prompt (str): The prompt to send to OpenAI
             model (str, optional): Model to use. Defaults to the instance's model.
-            max_tokens (int, optional): Maximum tokens in the response. Defaults to 4000.
+            max_tokens (int, optional): Maximum tokens in the response. If None, use model config.
 
         Returns:
             str: The response from OpenAI
@@ -238,16 +325,30 @@ class OpenAIConversation:
         if model is None:
             model = self.model
 
+        # Get model configuration
+        config = get_model_config(model)
+
+        # Use provided max_tokens or fall back to config
+        if max_tokens is None:
+            max_tokens = config.get("max_tokens", 4096)
+
         # Create messages array with conversation history plus new prompt
         messages = [{"role": m["role"], "content": m["content"]} for m in self.conversation_history]
         messages.append({"role": "user", "content": prompt})
 
+        # Prepare API call parameters
+        params = {
+            "model": model,
+            "messages": messages,
+            "max_completion_tokens": max_tokens
+        }
+
+        # Only add reasoning_effort if the model supports it and it's provided
+        if self.reasoning_effort is not None and config.get("supports_reasoning", False):
+            params["reasoning_effort"] = self.reasoning_effort
+
         # Make the API call
-        response = self.client.chat.completions.create(
-            model=model,
-            messages=messages,
-            max_tokens=max_tokens
-        )
+        response = self.client.chat.completions.create(**params)
 
         # Get the response content
         full_response = response.choices[0].message.content
@@ -256,7 +357,7 @@ class OpenAIConversation:
         self.conversation_history.append({"role": "user", "content": prompt})
         self.conversation_history.append({"role": "assistant", "content": full_response})
 
-        print(full_response)
+        print_colored(full_response, self.color)
         return full_response
 
     def reset_conversation(self):
@@ -271,8 +372,7 @@ class OpenAIConversation:
 
 class OllamaConversation:
     """Manages conversations with Ollama models"""
-
-    def __init__(self, model="llama3.1", base_url="http://localhost:11434/v1", api_key="ollama"):
+    def __init__(self, model="llama3.1", base_url="http://localhost:11435/v1", api_key="ollama", color=None):
         """
         Initialize an Ollama conversation
 
@@ -288,6 +388,7 @@ class OllamaConversation:
         )
         self.conversation_history = []
         self.context_size = self.get_model_context_size(model)
+        self.color=color
 
     def get_model_context_size(self, model):
         """
@@ -333,7 +434,7 @@ class OllamaConversation:
             print_colored("Warning: Could not retrieve context size from Ollama. Returning unknown (-1).", YELLOW)
             return -1
 
-    def ask(self, prompt, model=None, system_prompt=None, color=RED):
+    def ask(self, prompt, model=None, system_prompt=None):
         """
         Send a message to Ollama, stream the response, and update conversation history
 
@@ -392,14 +493,12 @@ class OllamaConversation:
                 if not first_token_received and chunk.choices and chunk.choices[0].delta.content:
                     spinner.stop()
                     first_token_received = True
-                    print(f"{color}", end="", flush=True)
+                    print_colored("", f"{self.color}")
 
                 if chunk.choices and chunk.choices[0].delta.content:
                     content = chunk.choices[0].delta.content
-                    print(content, end="", flush=True)
+                    print_colored(content, self.color)
                     full_response += content
-
-            print(f"{RESET}")  # Reset color
 
             # Update conversation history
             self.conversation_history.append({"role": "user", "content": prompt})
@@ -410,7 +509,7 @@ class OllamaConversation:
         except Exception as e:
             if 'spinner' in locals():
                 spinner.stop()
-            print(f"{color}Error: {str(e)}{RESET}")
+            print(f"{self.color}Error: {str(e)}{RESET}")
             return f"Error: {str(e)}"
 
     def reset_conversation(self):
@@ -429,6 +528,103 @@ class OllamaConversation:
         else:
             print(f"Model: {self.model}, Context Size: UNKNOWN")
 
+class GeminiConversation:
+    def __init__(self, api_key, model="gemini-2.0-flash", color=None):
+        """
+        Initialize a Gemini conversation with the provided API key
+
+        Args:
+            api_key (str): Gemini API key
+            model (str, optional): The model to use. Defaults to "gemini-1.5-pro".
+            color (str, optional): ANSI color for output. Defaults to None.
+        """
+        try:
+
+            self.genai = genai
+
+            self.genai.configure(api_key=api_key)
+            self.model = model
+            self.color = color
+            self.model_instance = self.genai.GenerativeModel(model)
+            self.chat_session = self.model_instance.start_chat(history=[])
+            self.conversation_history = []
+        except ImportError:
+            print_colored("Error: google-generativeai package not installed. Please install it with 'pip install google-generativeai'", RED)
+            raise
+        except Exception as e:
+            print_colored(f"Error initializing Gemini: {str(e)}", RED)
+            raise
+
+    def ask(self, prompt, model=None, max_tokens=None):
+        """
+        Send a message to Gemini, stream the response, and update conversation history
+
+        Args:
+            prompt (str): The prompt to send to Gemini
+            model (str, optional): Model to use. Defaults to the instance's model.
+            max_tokens (int, optional): Maximum tokens in the response. If None, use model config.
+
+        Returns:
+            str: The complete response from Gemini
+        """
+        try:
+            if model and model != self.model:
+                self.model = model
+                self.model_instance = self.genai.GenerativeModel(model)
+                # Create a new chat session for the new model
+                self.chat_session = self.model_instance.start_chat(history=[])
+                # Note: This loses conversation history when changing models
+
+            # Get model configuration
+            config = get_model_config(model or self.model)
+
+            # Use provided max_tokens or fall back to config
+            if max_tokens is None:
+                max_tokens = config.get("max_tokens", 8192)
+
+            # Add the new prompt to conversation history for tracking
+            self.conversation_history.append({"role": "user", "content": prompt})
+
+            # Send the message and get the response
+            response = self.chat_session.send_message(
+                prompt,
+                stream=True,
+                generation_config={
+                    "max_output_tokens": max_tokens,
+                }
+            )
+
+            full_response = ""
+            for chunk in response:
+                # Different versions of the API might return different objects
+                if hasattr(chunk, "text"):
+                    text = chunk.text
+                elif hasattr(chunk, "parts") and len(chunk.parts) > 0:
+                    text = str(chunk.parts[0])
+                else:
+                    text = str(chunk)
+
+                print_colored(text, self.color)
+                full_response += text
+
+            # Add the response to conversation history for tracking
+            self.conversation_history.append({"role": "assistant", "content": full_response})
+
+            return full_response
+        except Exception as e:
+            error_msg = f"Gemini API error: {str(e)}"
+            print_colored(error_msg, RED)
+            return error_msg
+
+    def reset_conversation(self):
+        """Clear the conversation history by starting a new chat session"""
+        self.chat_session = self.model_instance.start_chat(history=[])
+        self.conversation_history = []
+        print("Conversation history has been reset.")
+
+    def get_conversation_history(self):
+        """Return the current conversation history in a format compatible with other models"""
+        return self.conversation_history
 
 # Standalone for quick one-shots without conversation history
 def ask_claude_thinking_streaming(prompt):
@@ -484,7 +680,7 @@ def ask_claude_thinking_streaming(prompt):
                 current_block = None
 
 def print_colored(text, color):
-    print(f"{color}{text}{RESET}")
+    print(f"{color}{text}{RESET}", end="", flush=True)
 
 
 
@@ -494,15 +690,87 @@ def load_prompt_from_file(filename):
         if os.path.exists(filename):
             with open(filename, 'r', encoding='utf-8') as file:
                 prompt = file.read().strip()
-            print_colored(f"Loaded {filename}", GREEN)
+            print_colored(f"Loaded {filename}\n", GREEN)
             return prompt
     except Exception as e:
-        print_colored(f"Error loading {filename}: {str(e)}", RED)
+        print_colored(f"Error loading {filename}: {str(e)}\n", RED)
     return None
 
 
-# Main execution
-if __name__ == "__main__":
+def run_openai_query(prompt, api_key=None, model="o3-mini", key_file="apikeys.json", reasoning_effort=None):
+    """Run a query against OpenAI models"""
+    if not api_key:
+        key_manager = APIKeyManager(key_file)
+        api_key = key_manager.get_key("openai")
+        if not api_key:
+            print_colored("Error: No OpenAI API key found\n", RED)
+            return
+
+    # Get the model configuration
+    config = get_model_config(model)
+    max_tokens = config.get("max_tokens", 4096)
+
+    # Only pass reasoning_effort if the model supports it
+    if reasoning_effort is not None and not config.get("supports_reasoning", False):
+        print_colored(f"Note: {model} does not support reasoning_effort. This parameter will be ignored.\n", YELLOW)
+        reasoning_effort = None
+
+    openai_chat = OpenAIConversation(api_key, model=model, color=MAGENTA, reasoning_effort=reasoning_effort)
+    return openai_chat.ask(prompt, max_tokens=max_tokens)
+
+
+def run_claude_query(prompt, api_key=None, model="claude-3-7-sonnet-latest", key_file="apikeys.json"):
+    """Run a query against Claude models with thinking enabled"""
+    if not api_key:
+        key_manager = APIKeyManager(key_file)
+        api_key = key_manager.get_key("anthropic")
+        if not api_key:
+            print_colored("Error: No Anthropic API key found\n", RED)
+            return
+
+    # Get the model configuration
+    config = get_model_config(model)
+
+    # Log a note if thinking is not enabled but we're using the thinking function
+    if not config.get("thinking_enabled", False):
+        print_colored(f"Note: {model} does not support thinking. Using standard API call.\n", YELLOW)
+
+    claude = ClaudeConversation(api_key, CYAN)
+    return claude.ask_with_thinking(prompt, model=model)
+
+
+def run_gemini_query(prompt, api_key=None, model="gemini-2.0-flash", key_file="apikeys.json"):
+    """Run a query against Google Gemini models"""
+    if not api_key:
+        key_manager = APIKeyManager(key_file)
+        api_key = key_manager.get_key("gemini")
+        if not api_key:
+            print_colored("Error: No Gemini API key found\n", RED)
+            return
+
+    # Get the model configuration
+    config = get_model_config(model)
+    max_tokens = config.get("max_tokens", 8192)
+
+    try:
+        gemini = GeminiConversation(api_key, model=model, color=YELLOW)
+        return gemini.ask(prompt, max_tokens=max_tokens)
+    except ImportError:
+        print_colored("Skipping Gemini (google-generativeai package not installed)\n", YELLOW)
+        return None
+    except Exception as e:
+        print_colored(f"Error initializing Gemini: {str(e)}\n", RED)
+        return None
+
+
+def run_ollama_query(prompt, model="llama3.1", system_prompt=None):
+    """Run a query against Ollama models"""
+    ollama = OllamaConversation(model=model, color=GREEN)
+    return ollama.ask(prompt, system_prompt=system_prompt)
+
+# Main execution for when the script is run directly
+def main():
+    """Main function for direct execution of the script"""
     # Initialize key manager
     key_manager = APIKeyManager("apikeys.json")
 
@@ -524,19 +792,25 @@ if __name__ == "__main__":
     # Display the question
     print(f"\nQUESTION: {q}\n")
 
-    # Example: Ask Claude with thinking enabled
-    if key_manager.get_key("anthropic"):
-        print_colored("\n=== CLAUDE RESPONSE ===", BLUE)
-        claude = ClaudeConversation(key_manager.get_key("anthropic"))
-        claude.ask_with_thinking(q)
-
-    # Example: Ask Ollama
-    print_colored("\n=== OLLAMA RESPONSE ===", GREEN)
-    ollama = OllamaConversation(model=ollama_model)
-    ollama.ask(q, system_prompt=system_prompt, color=RED)
-
-    # Example: Ask OpenAI
+    # Ask OpenAI
     if key_manager.get_key("openai"):
-        print_colored("\n=== OPENAI RESPONSE ===", MAGENTA)
-        openai_chat = OpenAIConversation(key_manager.get_key("openai"))
-        openai_chat.ask(q)
+        print_colored("\n=== OPENAI RESPONSE ===\n", MAGENTA)
+        run_openai_query(q)
+
+    # Ask Claude
+    if key_manager.get_key("anthropic"):
+        print_colored("\n=== CLAUDE RESPONSE ===\n", CYAN)
+        run_claude_query(q)
+
+    # Ask Gemini
+    if key_manager.get_key("gemini"):
+        print_colored("\n=== GEMINI RESPONSE ===\n", YELLOW)
+        run_gemini_query(q)
+
+    # Ask Ollama
+    print_colored("\n=== OLLAMA RESPONSE ===\n", GREEN)
+    run_ollama_query(q, system_prompt=system_prompt)
+
+if __name__ == "__main__":
+    main()
+
