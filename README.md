@@ -2,6 +2,10 @@
 
 A flexible toolkit for testing and comparing responses from multiple AI models (OpenAI, Claude, Gemini, and Ollama).
 
+## Screenshot
+![image](https://github.com/user-attachments/assets/bb30ee12-8925-4637-a684-7e0bd295b9fc)
+
+
 ## Overview
 
 AI Testbed provides two primary workflows:
