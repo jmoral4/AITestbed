@@ -26,6 +26,9 @@ share/python-wheels/
 *.egg
 MANIFEST
 
+# Pycharm
+.idea/
+
 # API keys
 apikeys.json
 **/apikeys.json
