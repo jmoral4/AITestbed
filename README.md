@@ -78,7 +78,7 @@ You can also create a `system_prompt.txt` file for Ollama models.
 
 ## Usage
 
-### Debug usage (within an IDE like PyCharm/VSCode)
+### Method 0: Debug usage (within an IDE like PyCharm/VSCode)
 #### Sequentially
 Open `aitestbed.py` , ensure you have a prompt in `prompt.txt`, ensure you have the keys within `apikeys.json` (example in examplesettings.json) for the models you want to run.
 Run it.
