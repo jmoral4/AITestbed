@@ -78,6 +78,18 @@ You can also create a `system_prompt.txt` file for Ollama models.
 
 ## Usage
 
+### Debug usage (within an IDE like PyCharm/VSCode)
+#### Sequentially
+Open `aitestbed.py` , ensure you have a prompt in `prompt.txt`, ensure you have the keys within `apikeys.json` (example in examplesettings.json) for the models you want to run.
+Run it.
+Your query will output sequentially in your IDE's console/terminal output.
+
+#### Concurrently
+Open `concurrent_ai_test.py`, ensure you have a prompt in `prompt.txt`, ensure you have the keys within `apikeys.json` (example in examplesettings.json) for the models you want to run.
+Run it. 
+Your query will output in multiple *Windows Terminal* windows. 
+
+
 ### Method 1: Sequential Testing with aitestbed.py
 
 This mode runs the same prompt through multiple models sequentially in the same terminal window.
