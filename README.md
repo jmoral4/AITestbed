@@ -47,10 +47,31 @@ Notes:
 
 ### Prompt File
 
-Create a `prompt.txt` file with your question or instruction. For example:
+Create a `prompt.txt` file with your question or instructions. For example:
 
 ```
 Explain quantum computing in simple terms that a 10-year-old could understand.
+```
+
+This can be one line or hundreds of lines long. It all depends on the context length of the models you've using. I've successfully provided multiple files from a codebase or entire chapters of writings.
+
+It's usually helpful to denote files in a larger query like so:
+
+```
+# Task: Refactor the webpage mypage.html below to introduce charts from chartjs. 
+# Criteria 1: Only use ChartJS
+# Criteria 2: Don't add new text content but feel free to re-arrange items.
+# Criteria 3: Don't use the color BLUE, I hate it.
+
+# mypage.html
+<lots of content
+
+# another_reference_page.html
+<content>
+
+# mycustom.js
+<content> 
+
 ```
 
 You can also create a `system_prompt.txt` file for Ollama models.
