@@ -133,8 +133,8 @@ if __name__ == "__main__":
     main(["--prompt-file", "prompt.txt",
           "--openai-model", "gpt-4o",
           "--claude-model", "claude-3-7-sonnet-latest",
-          "--ollama-model", "gemma3",
-          "--gemini-model", "gemini-2.0-flash"])
+          "--ollama-model", "gemma3:27b",
+          "--gemini-model", "gemini-2.5-pro-exp-03-25"])
 
             # Other Options
             # gemini-2.5-pro-exp-03-25

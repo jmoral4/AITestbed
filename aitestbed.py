@@ -6,6 +6,8 @@ from halo import Halo
 import json
 from pathlib import Path
 import google.generativeai as genai
+import datetime
+import re
 
 # ANSI escape codes for some colors
 RED = "\033[31m"
@@ -16,13 +18,6 @@ MAGENTA = "\033[35m"
 CYAN = "\033[36m"
 RESET = "\033[0m"  # Resets the color to default
 
-# gemini-2.5-pro-exp-03-25
-# gemini-2.0-flash-lite (fast and cheap)
-# o3-mini
-# gpt-4o
-# o1
-# claude-3-5-haiku-latest (small and fast)
-
 # Model configurations
 MODEL_CONFIGS = {
     # OpenAI models
@@ -31,11 +26,11 @@ MODEL_CONFIGS = {
         "supports_reasoning": False,
     },
     "o3-mini": {
-        "max_tokens": 60000,
+        "max_tokens": 100000,
         "supports_reasoning": True,
     },
     "o1": {
-        "max_tokens": 60000,
+        "max_tokens": 100000,
         "supports_reasoning": False,
     },
     # Claude models
@@ -46,11 +41,11 @@ MODEL_CONFIGS = {
         "max_tokens_with_thinking": 128000,
     },
     "claude-3-5-haiku-latest": {
-        "max_tokens": 50000,
+        "max_tokens": 100000,
         "thinking_enabled": False,
     },
     # Gemini models
-    "gemini-2.0-pro-exp-02-05": {
+    "gemini-2.5-pro-exp-03-25": {
         "max_tokens": 65636,
     },
     "gemini-2.0-flash": {
@@ -78,9 +73,68 @@ DEFAULT_CONFIG = {
     "thinking_enabled": False,
 }
 
+
 def get_model_config(model_name):
     """Get the configuration for a specific model, with fallback to defaults"""
     return MODEL_CONFIGS.get(model_name, DEFAULT_CONFIG)
+
+
+class ResponseSaver:
+    """
+    A reusable class for saving AI responses to files with standardized naming.
+    """
+
+    def __init__(self, output_dir="responses"):
+        """
+        Initialize the ResponseSaver.
+
+        Args:
+            output_dir (str, optional): Directory to save responses. Defaults to "responses".
+        """
+        self.output_dir = output_dir
+        os.makedirs(self.output_dir, exist_ok=True)
+
+    def save_response(self, prompt, response, model):
+        """
+        Save an AI response to a markdown file with the format:
+        <timestamp:HHMMSS>.<model>.<first 50 chars of prompt>.md
+
+        Args:
+            prompt (str): The user's prompt
+            response (str): The AI's response
+            model (str): The model name
+
+        Returns:
+            str: Path to the saved file
+        """
+        # Generate timestamp (HHMMSS)
+        timestamp = datetime.datetime.now().strftime("%H%M%S")
+
+        # Get first 30 chars of prompt and strip non-alphanumeric characters
+        prompt_part = re.sub(r'[^a-zA-Z0-9]', '', prompt[:50])
+
+        # Clean model name (remove non-alphanumeric characters)
+        model_clean = re.sub(r'[^a-zA-Z0-9]', '', model)
+
+        # Create filename
+        filename = f"{timestamp}.{model_clean}.{prompt_part}.md"
+
+        # Full path to file
+        file_path = os.path.join(self.output_dir, filename)
+
+        # Write response to file
+        with open(file_path, 'w', encoding='utf-8') as f:
+            f.write(f"# Prompt: {prompt}\n\n")
+            f.write(f"## Model: {model}\n\n")
+            f.write(response)
+
+        print(f"Response saved to: {file_path}")
+        return file_path
+
+
+# Create a global response saver instance
+response_saver = ResponseSaver()
+
 
 class APIKeyManager:
     """Manages API keys for different providers"""
@@ -271,6 +325,9 @@ class ClaudeConversation:
         self.conversation_history.append({"role": "user", "content": prompt})
         self.conversation_history.append({"role": "assistant", "content": full_response})
 
+        # Save response to file
+        response_saver.save_response(prompt, full_response, model)
+
         return full_response
 
     def reset_conversation(self):
@@ -358,6 +415,10 @@ class OpenAIConversation:
         self.conversation_history.append({"role": "assistant", "content": full_response})
 
         print_colored(full_response, self.color)
+
+        # Save response to file
+        response_saver.save_response(prompt, full_response, model)
+
         return full_response
 
     def reset_conversation(self):
@@ -372,6 +433,7 @@ class OpenAIConversation:
 
 class OllamaConversation:
     """Manages conversations with Ollama models"""
+
     def __init__(self, model="llama3.1", base_url="http://localhost:11435/v1", api_key="ollama", color=None):
         """
         Initialize an Ollama conversation
@@ -388,7 +450,7 @@ class OllamaConversation:
         )
         self.conversation_history = []
         self.context_size = self.get_model_context_size(model)
-        self.color=color
+        self.color = color
 
     def get_model_context_size(self, model):
         """
@@ -504,6 +566,9 @@ class OllamaConversation:
             self.conversation_history.append({"role": "user", "content": prompt})
             self.conversation_history.append({"role": "assistant", "content": full_response})
 
+            # Save response to file
+            response_saver.save_response(prompt, full_response, model)
+
             return full_response
 
         except Exception as e:
@@ -528,6 +593,7 @@ class OllamaConversation:
         else:
             print(f"Model: {self.model}, Context Size: UNKNOWN")
 
+
 class GeminiConversation:
     def __init__(self, api_key, model="gemini-2.0-flash", color=None):
         """
@@ -549,7 +615,9 @@ class GeminiConversation:
             self.chat_session = self.model_instance.start_chat(history=[])
             self.conversation_history = []
         except ImportError:
-            print_colored("Error: google-generativeai package not installed. Please install it with 'pip install google-generativeai'", RED)
+            print_colored(
+                "Error: google-generativeai package not installed. Please install it with 'pip install google-generativeai'",
+                RED)
             raise
         except Exception as e:
             print_colored(f"Error initializing Gemini: {str(e)}", RED)
@@ -610,6 +678,9 @@ class GeminiConversation:
             # Add the response to conversation history for tracking
             self.conversation_history.append({"role": "assistant", "content": full_response})
 
+            # Save response to file
+            response_saver.save_response(prompt, full_response, model or self.model)
+
             return full_response
         except Exception as e:
             error_msg = f"Gemini API error: {str(e)}"
@@ -626,19 +697,22 @@ class GeminiConversation:
         """Return the current conversation history in a format compatible with other models"""
         return self.conversation_history
 
+
 # Standalone for quick one-shots without conversation history
 def ask_claude_thinking_streaming(prompt):
     client = anthropic.Anthropic()
     apikeys = APIKeyManager("apikeys.json")
     client.api_key = apikeys.get_key("anthropic")
+    model = "claude-3-7-sonnet-latest"
 
     # Track the current block type
     current_block = None
     thinking_started = False
     response_started = False
+    full_response = ""
 
     with client.beta.messages.stream(
-            model="claude-3-7-sonnet-latest",
+            model=model,
             max_tokens=60000,
             thinking={
                 "type": "enabled",
@@ -672,6 +746,7 @@ def ask_claude_thinking_streaming(prompt):
 
                     # Stream response content directly
                     print(event.delta.text, end="", flush=True)
+                    full_response += event.delta.text
 
             elif event.type == "content_block_stop":
                 if current_block == "thinking" and not response_started:
@@ -679,9 +754,14 @@ def ask_claude_thinking_streaming(prompt):
 
                 current_block = None
 
+    # Save response to file
+    response_saver.save_response(prompt, full_response, model)
+
+    return full_response
+
+
 def print_colored(text, color):
     print(f"{color}{text}{RESET}", end="", flush=True)
-
 
 
 def load_prompt_from_file(filename):
@@ -768,6 +848,7 @@ def run_ollama_query(prompt, model="llama3.1", system_prompt=None):
     ollama = OllamaConversation(model=model, color=GREEN)
     return ollama.ask(prompt, system_prompt=system_prompt)
 
+
 # Main execution for when the script is run directly
 def main():
     """Main function for direct execution of the script"""
@@ -811,6 +892,6 @@ def main():
     print_colored("\n=== OLLAMA RESPONSE ===\n", GREEN)
     run_ollama_query(q, system_prompt=system_prompt)
 
+
 if __name__ == "__main__":
     main()
-
