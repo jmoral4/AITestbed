@@ -29,6 +29,11 @@ MANIFEST
 # Pycharm
 .idea/
 
+responses/
+
+# prevent future prompts for being checked in. Keep existing sample one.
+prompt.txt
+
 # API keys
 apikeys.json
 **/apikeys.json
