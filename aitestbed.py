@@ -8,6 +8,7 @@ from pathlib import Path
 import google.generativeai as genai
 import datetime
 import re
+import tiktoken
 
 # ANSI escape codes for some colors
 RED = "\033[31m"
@@ -31,9 +32,8 @@ MODEL_CONFIGS = {
     },
     "o1": {
         "max_tokens": 100000,
-        "supports_reasoning": False,
+        "supports_reasoning": True,
     },
-    # Claude models
     "claude-3-7-sonnet-latest": {
         "max_tokens": 30720,
         "thinking_enabled": True,
@@ -44,7 +44,6 @@ MODEL_CONFIGS = {
         "max_tokens": 100000,
         "thinking_enabled": False,
     },
-    # Gemini models
     "gemini-2.5-pro-exp-03-25": {
         "max_tokens": 65636,
     },
@@ -57,7 +56,6 @@ MODEL_CONFIGS = {
     "gemini-2.0-pro": {
         "max_tokens": 16384,
     },
-    # Ollama models
     "llama3.1": {
         "max_tokens": 4096,
     },
@@ -77,6 +75,55 @@ DEFAULT_CONFIG = {
 def get_model_config(model_name):
     """Get the configuration for a specific model, with fallback to defaults"""
     return MODEL_CONFIGS.get(model_name, DEFAULT_CONFIG)
+
+
+def count_tokens(text, model="claude-3-7-sonnet-latest"):
+    """
+    Estimate token count for a given text using tiktoken.
+
+    Args:
+        text (str): The text to count tokens for
+        model (str): The model to use for token counting
+
+    Returns:
+        int: Estimated token count
+    """
+    try:
+
+
+        # Map model names to encoding types
+        # This is a simplified mapping; add more as needed
+        model_to_encoding = {
+            # OpenAI models generally use cl100k_base for newer models
+            "gpt-4o": "cl100k_base",
+            "o3-mini": "cl100k_base",
+            "o1": "cl100k_base",
+
+            # Claude models - we'll use cl100k as approximation
+            "claude-3-7-sonnet-latest": "cl100k_base",
+            "claude-3-5-haiku-latest": "cl100k_base",
+
+            # Gemini models - use cl100k as approximation
+            "gemini-2.5-pro-exp-03-25": "cl100k_base",
+            "gemini-2.0-flash": "cl100k_base",
+
+            # Default for other models
+            "default": "cl100k_base"
+        }
+
+        # Get the encoding type based on model
+        encoding_name = model_to_encoding.get(model, model_to_encoding["default"])
+        encoding = tiktoken.get_encoding(encoding_name)
+
+        # Count tokens
+        tokens = encoding.encode(text)
+        return len(tokens)
+
+    except ImportError:
+        # If tiktoken is not available, provide a rough estimate
+        # This is very approximate (assuming ~4 chars per token)
+        print("Warning: tiktoken not installed. Using rough estimate (~4 chars/token).")
+        return len(text) // 4
 
 
 class ResponseSaver:
@@ -764,13 +811,17 @@ def print_colored(text, color):
     print(f"{color}{text}{RESET}", end="", flush=True)
 
 
-def load_prompt_from_file(filename):
-    """Load a prompt from a text file."""
+def load_prompt_from_file(filename, model="claude-3-7-sonnet-latest"):
+    """Load a prompt from a text file with token counting."""
     try:
         if os.path.exists(filename):
             with open(filename, 'r', encoding='utf-8') as file:
                 prompt = file.read().strip()
-            print_colored(f"Loaded {filename}\n", GREEN)
+
+            # Count tokens
+            token_count = count_tokens(prompt, model)
+
+            print_colored(f"Loaded {filename} ({token_count} tokens)\n", YELLOW)
             return prompt
     except Exception as e:
         print_colored(f"Error loading {filename}: {str(e)}\n", RED)
@@ -795,7 +846,7 @@ def run_openai_query(prompt, api_key=None, model="o3-mini", key_file="apikeys.js
         print_colored(f"Note: {model} does not support reasoning_effort. This parameter will be ignored.\n", YELLOW)
         reasoning_effort = None
 
-    openai_chat = OpenAIConversation(api_key, model=model, color=MAGENTA, reasoning_effort=reasoning_effort)
+    openai_chat = OpenAIConversation(api_key, model=model, color=YELLOW, reasoning_effort=reasoning_effort)
     return openai_chat.ask(prompt, max_tokens=max_tokens)
 
 

@@ -4,7 +4,6 @@ import subprocess
 import sys
 import os
 import argparse
-import aitestbed
 
 
 def check_windows_terminal():
@@ -23,11 +22,18 @@ def check_windows_terminal():
         return False
 
 
-def run_in_windows_terminal(title, command, working_dir):
+def run_in_windows_terminal(title, command, working_dir, is_first=False):
     """Run a command in a new Windows Terminal tab with specified working directory"""
     try:
-        # Try the new syntax first with working directory
-        subprocess.Popen(['wt', '-w', '0', 'nt', '--title', title, '-d', working_dir, 'cmd', '/c', command])
+        if is_first:
+            # For the first window, create a new window without targeting any existing window
+            subprocess.Popen(['wt', 'nt', '--title', title, '-d', working_dir, 'cmd', '/c', command])
+        else:
+            # For subsequent tabs, target the existing window
+            subprocess.Popen(['wt', '-w', '0', 'nt', '--title', title, '-d', working_dir, 'cmd', '/c', command])
+            # Add a small delay to allow the window to initialize
+            import time
+            time.sleep(0.5)
     except Exception as e:
         print(f"First Windows Terminal method failed: {e}")
         try:
@@ -113,7 +119,12 @@ def main(args=None):
     # Pass the script directory as the working directory to ensure API keys are found
     if use_windows_terminal:
         print("Using Windows Terminal to spawn separate tabs...")
-        run_in_windows_terminal(f"OpenAI ({parsed_args.openai_model})", openai_cmd, script_dir)
+        # First window without targeting an existing window
+        run_in_windows_terminal(f"OpenAI ({parsed_args.openai_model})", openai_cmd, script_dir, is_first=True)
+        # Small delay to ensure the first window is created
+        import time
+        time.sleep(1)
+        # Subsequent tabs targeting the existing window
         run_in_windows_terminal(f"Claude ({parsed_args.claude_model})", claude_cmd, script_dir)
         run_in_windows_terminal(f"Ollama ({parsed_args.ollama_model})", ollama_cmd, script_dir)
         run_in_windows_terminal(f"Gemini ({parsed_args.gemini_model})", gemini_cmd, script_dir)
@@ -131,13 +142,14 @@ def main(args=None):
 if __name__ == "__main__":
     # Call main with command line arguments as a list
     main(["--prompt-file", "prompt.txt",
-          "--openai-model", "gpt-4o",
+          "--openai-model", "o1", "--reasoning-effort", "medium",
           "--claude-model", "claude-3-7-sonnet-latest",
-          "--ollama-model", "gemma3:27b",
-          "--gemini-model", "gemini-2.5-pro-exp-03-25"])
+          "--ollama-model", "mistral-nemo",
+          "--gemini-model", "gemini-2.0-flash"])
 
             # Other Options
             # gemini-2.5-pro-exp-03-25
+            # gemini-2.0-flash
             # gemini-2.0-flash-lite (fast and cheap)
             # o3-mini
             # gpt-4o

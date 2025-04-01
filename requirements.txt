@@ -4,3 +4,4 @@ requests>=2.25.1
 
 anthropic~=0.49.0
 protobuf~=5.29.4
+tiktoken~=0.9.0
