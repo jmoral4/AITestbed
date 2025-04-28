@@ -401,85 +401,110 @@ class ClaudeConversation:
 
 
 class OpenAIConversation:
-    def __init__(self, api_key=None, model="o3-mini", reasoning_effort='medium', color=None):
-        """
-        Initialize an OpenAI conversation
+    """
+    Conversation wrapper that ¹ never overflows the model context window and ²
+    automatically chains requests when `finish_reason == "length"`.
+    """
 
-        Args:
-            api_key (str, required): OpenAI API key
-            model (str, optional): Default model to use
-            reasoning_effort (str, optional): Reasoning effort setting -- default to medium if nothing provided
-            color (str, optional): Color for output
-        """
-
-        # Initialize client if we have a key
+    def __init__(
+        self,
+        api_key: str | None = None,
+        model: str = "o3-mini",
+        reasoning_effort: str | None = "medium",
+        color: str | None = None,
+        max_continue_loops: int = 5,          # ← safety valve
+    ):
         if api_key:
             self.client = openai.OpenAI(api_key=api_key)
         else:
             self.client = None
-            print("ERROR: No OpenAI API key provided. Please set a key before making requests.")
-
-        self.conversation_history = []
+            print("ERROR: No OpenAI API key provided.")
+        self.conversation_history: list[dict] = []
         self.model = model
         self.color = color
         self.reasoning_effort = reasoning_effort
+        self.max_continue_loops = max_continue_loops
 
-    def ask(self, prompt, model=None, max_tokens=None):
+    # --------------------------------------------------------------------- #
+    def ask(self, prompt: str, model: str | None = None, max_completion_tokens: int | None = None) -> str:
         """
-        Send a message to OpenAI and update conversation history
-
-        Args:
-            prompt (str): The prompt to send to OpenAI
-            model (str, optional): Model to use. Defaults to the instance's model.
-            max_tokens (int, optional): Maximum tokens in the response. If None, use model config.
-
-        Returns:
-            str: The response from OpenAI
+        Send `prompt` to the model, trimming history if needed and automatically
+        issuing “continue” follow-ups when the model hits the length cap.
         """
         if self.client is None:
-            raise ValueError("OpenAI client not initialized. Please provide an API key.")
+            raise ValueError("OpenAI client not initialised.")
 
-        if model is None:
-            model = self.model
+        model = model or self.model
+        cfg = get_model_config(model)
+        ctx_limit = cfg.get("max_tokens", 4096)
+        max_completion_tokens = max_completion_tokens or ctx_limit // 4  # heuristic
 
-        # Get model configuration
-        config = get_model_config(model)
+        full_answer = ""
+        follow_up_prompt = "Please continue."
+        continue_loops = 0
+        role_user_prompt = prompt
+        cumulative_output_tokens = 0  # <-- NEW
 
-        # Use provided max_tokens or fall back to config
-        if max_tokens is None:
-            max_tokens = config.get("max_tokens", 4096)
-        print(f"MAX TOKENS:{max_tokens}")
-        # Create messages array with conversation history plus new prompt
-        messages = [{"role": m["role"], "content": m["content"]} for m in self.conversation_history]
-        messages.append({"role": "user", "content": prompt})
+        while True:
+            # ---------- build message list that fits -------------------- #
+            hist = _shrink_history_to_fit(
+                self.conversation_history.copy(),
+                role_user_prompt,
+                model,
+                ctx_limit,
+                max_completion_tokens,
+            )
+            messages = hist + [{"role": "user", "content": role_user_prompt}]
 
-        # Prepare API call parameters
-        params = {
-            "model": model,
-            "messages": messages,
-            "max_completion_tokens": max_tokens
-        }
+            params = {
+                "model": model,
+                "messages": messages,
+                "max_completion_tokens": max_completion_tokens,
+            }
+            if cfg.get("supports_reasoning") and self.reasoning_effort:
+                params["reasoning_effort"] = self.reasoning_effort
 
-        # Only add reasoning_effort if the model supports it and it's provided
-        if self.reasoning_effort is not None and config.get("supports_reasoning", False):
-            params["reasoning_effort"] = self.reasoning_effort
+            response = self.client.chat.completions.create(**params)
 
-        # Make the API call
-        response = self.client.chat.completions.create(**params)
+            choice = response.choices[0]
+            part_text = choice.message.content
+            finish_reason = choice.finish_reason
+            api_comp_tok = getattr(response.usage, "completion_tokens", None)
 
-        # Get the response content
-        full_response = response.choices[0].message.content
+            # ---- DEBUG: token counting ---------------------------------------- #
+            part_tokens = count_tokens(part_text, model)
+            cumulative_output_tokens += part_tokens
+            debug_msg = (
+                f"\n[DEBUG]"
+                f" reason={finish_reason}"
+                f" | api_completion_tokens={api_comp_tok}"
+                f" | part_tokens={part_tokens}"
+                f" | cumulative={cumulative_output_tokens}"
+                f" | ctx_limit={ctx_limit}"
+            )
+            print_colored(debug_msg + "\n", CYAN)
+            # ------------------------------------------------------------------- #
 
-        # Update conversation history
-        self.conversation_history.append({"role": "user", "content": prompt})
-        self.conversation_history.append({"role": "assistant", "content": full_response})
+            print_colored(part_text, self.color)
+            full_answer += part_text
 
-        print_colored(full_response, self.color)
+            # ---- update history (unchanged) ----------------------------------- #
+            self.conversation_history.append({"role": "user", "content": role_user_prompt})
+            self.conversation_history.append({"role": "assistant", "content": part_text})
 
-        # Save response to file
-        response_saver.save_response(prompt, full_response, model)
+            # ---- follow-up loop logic (unchanged) ------------------------------ #
+            if finish_reason != "length":
+                break
 
-        return full_response
+            continue_loops += 1
+            if continue_loops >= self.max_continue_loops:
+                print_colored("\n[Stopped after max_continue_loops]\n", RED)
+                break
+            role_user_prompt = follow_up_prompt
+
+        response_saver.save_response(prompt, full_answer, model)
+        return full_answer
+    # --------------------------------------------------------------------- #
 
     def reset_conversation(self):
         """Clear the conversation history"""
@@ -797,7 +822,7 @@ def run_openai_query(prompt, api_key=None, model="o3-mini", key_file="apikeys.js
         reasoning_effort = None
 
     openai_chat = OpenAIConversation(api_key, model=model, color=YELLOW, reasoning_effort=reasoning_effort)
-    return openai_chat.ask(prompt, max_tokens=max_tokens)
+    return openai_chat.ask(prompt, max_completion_tokens=max_tokens)
 
 
 def run_claude_query(prompt, api_key=None, model="claude-3-7-sonnet-latest", key_file="apikeys.json"):
@@ -849,6 +874,34 @@ def run_ollama_query(prompt, model="llama3.1", system_prompt=None):
     ollama = OllamaConversation(model=model, color=GREEN)
     return ollama.ask(prompt, system_prompt=system_prompt)
 
+# ----  helpers -------------------------------------------------------------- #
+def _count_tokens_messages(messages: list[dict], model_name: str) -> int:
+    """Rough-and-ready token counter for a list of chat messages."""
+    return sum(count_tokens(m["content"], model_name) for m in messages)
+
+def _shrink_history_to_fit(
+    history: list[dict],
+    prompt: str,
+    model_name: str,
+    max_ctx: int,
+    max_completion: int,
+) -> list[dict]:
+    """
+    Trim the left-most (oldest) messages until
+    tokens(history)+tokens(prompt)+max_completion <= max_ctx
+    """
+    system_and_new = [{"role": "user", "content": prompt}]
+    while True:
+        tokens_needed = (
+            _count_tokens_messages(history + system_and_new, model_name)
+            + max_completion
+        )
+        if tokens_needed <= max_ctx or not history:
+            break
+        # drop the oldest (pairs are stored user/assistant sequentially)
+        history = history[2:] if len(history) >= 2 else history[1:]
+    return history
+# ---------------------------------------------------------------------------- #
 
 # Main execution for when the script is run directly
 def main():
