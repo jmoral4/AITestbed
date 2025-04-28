@@ -70,7 +70,7 @@ def main():
     try:
         if args.model == 'openai':
             model_name = args.model_name if args.model_name else "o3-mini"
-            print(f"=== OPENAI RESPONSE ({model_name}) ===")
+            print(f"=== OPENAI RESPONSE ({model_name}) Reasoning:{args.reasoning_effort} ===")
             aitestbed.run_openai_query(prompt, model=model_name, reasoning_effort=args.reasoning_effort)
 
         elif args.model == 'claude':
