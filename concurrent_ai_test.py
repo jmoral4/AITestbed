@@ -126,13 +126,13 @@ def main(args=None):
         time.sleep(1)
         # Subsequent tabs targeting the existing window
         run_in_windows_terminal(f"Claude ({parsed_args.claude_model})", claude_cmd, script_dir)
-        run_in_windows_terminal(f"Ollama ({parsed_args.ollama_model})", ollama_cmd, script_dir)
+        #run_in_windows_terminal(f"Ollama ({parsed_args.ollama_model})", ollama_cmd, script_dir)
         run_in_windows_terminal(f"Gemini ({parsed_args.gemini_model})", gemini_cmd, script_dir)
     else:
         print("Using CMD to spawn separate windows...")
         run_in_cmd(f"OpenAI ({parsed_args.openai_model})", openai_cmd, script_dir)
         run_in_cmd(f"Claude ({parsed_args.claude_model})", claude_cmd, script_dir)
-        run_in_cmd(f"Ollama ({parsed_args.ollama_model})", ollama_cmd, script_dir)
+        #run_in_cmd(f"Ollama ({parsed_args.ollama_model})", ollama_cmd, script_dir)
         run_in_cmd(f"Gemini ({parsed_args.gemini_model})", gemini_cmd, script_dir)
 
     print("All AI model processes have been started in separate windows.")
@@ -142,10 +142,10 @@ def main(args=None):
 if __name__ == "__main__":
     # Call main with command line arguments as a list
     main(["--prompt-file", "prompt.txt",
-          "--openai-model", "o1", "--reasoning-effort", "medium",
+          "--openai-model", "o3", "--reasoning-effort", "low",
           "--claude-model", "claude-3-7-sonnet-latest",
-          "--ollama-model", "mistral-nemo",
-          "--gemini-model", "gemini-2.0-flash"])
+          #"--ollama-model", "mistral-nemo",
+          "--gemini-model", "gemini-2.5-pro-preview-03-25"])
 
             # Other Options
             # gemini-2.5-pro-exp-03-25

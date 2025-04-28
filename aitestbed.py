@@ -30,6 +30,14 @@ MODEL_CONFIGS = {
         "max_tokens": 100000,
         "supports_reasoning": True,
     },
+    "o4-mini": {
+        "max_tokens": 100000,
+        "supports_reasoning": True,
+    },
+    "o3": {
+        "max_tokens": 100000,
+        "supports_reasoning": True,
+    },
     "o1": {
         "max_tokens": 100000,
         "supports_reasoning": True,
@@ -45,6 +53,9 @@ MODEL_CONFIGS = {
         "thinking_enabled": False,
     },
     "gemini-2.5-pro-exp-03-25": {
+        "max_tokens": 65636,
+    },
+    "gemini-2.5-pro-preview-03-25": {
         "max_tokens": 65636,
     },
     "gemini-2.0-flash": {
@@ -306,6 +317,7 @@ class ClaudeConversation:
             {"role": "user", "content": prompt}
         ]
 
+        print(f"MAX TOKENS:{max_tokens}")
         # Track the current block type
         current_block = None
         thinking_started = False
@@ -341,7 +353,8 @@ class ClaudeConversation:
                 elif event.type == "content_block_delta":
                     if event.delta.type == "thinking_delta":
                         # Stream thinking content directly (not saved to conversation)
-                        print(event.delta.thinking, end="", flush=True)
+                        print_colored(event.delta.thinking, CYAN )
+                        #print(event.delta.thinking, end="", flush=True)
 
                     elif event.delta.type == "text_delta":
                         # If we're transitioning from thinking to response
@@ -388,14 +401,14 @@ class ClaudeConversation:
 
 
 class OpenAIConversation:
-    def __init__(self, api_key=None, model="o3-mini", reasoning_effort=None, color=None):
+    def __init__(self, api_key=None, model="o3-mini", reasoning_effort='medium', color=None):
         """
         Initialize an OpenAI conversation
 
         Args:
             api_key (str, required): OpenAI API key
             model (str, optional): Default model to use
-            reasoning_effort (str, optional): Reasoning effort setting
+            reasoning_effort (str, optional): Reasoning effort setting -- default to medium if nothing provided
             color (str, optional): Color for output
         """
 
@@ -435,7 +448,7 @@ class OpenAIConversation:
         # Use provided max_tokens or fall back to config
         if max_tokens is None:
             max_tokens = config.get("max_tokens", 4096)
-
+        print(f"MAX TOKENS:{max_tokens}")
         # Create messages array with conversation history plus new prompt
         messages = [{"role": m["role"], "content": m["content"]} for m in self.conversation_history]
         messages.append({"role": "user", "content": prompt})
@@ -696,7 +709,7 @@ class GeminiConversation:
             # Use provided max_tokens or fall back to config
             if max_tokens is None:
                 max_tokens = config.get("max_tokens", 8192)
-
+            print(f"MAX TOKENS:{max_tokens}")
             # Add the new prompt to conversation history for tracking
             self.conversation_history.append({"role": "user", "content": prompt})
 
@@ -744,69 +757,6 @@ class GeminiConversation:
         """Return the current conversation history in a format compatible with other models"""
         return self.conversation_history
 
-
-# Standalone for quick one-shots without conversation history
-def ask_claude_thinking_streaming(prompt):
-    client = anthropic.Anthropic()
-    apikeys = APIKeyManager("apikeys.json")
-    client.api_key = apikeys.get_key("anthropic")
-    model = "claude-3-7-sonnet-latest"
-
-    # Track the current block type
-    current_block = None
-    thinking_started = False
-    response_started = False
-    full_response = ""
-
-    with client.beta.messages.stream(
-            model=model,
-            max_tokens=60000,
-            thinking={
-                "type": "enabled",
-                "budget_tokens": 32000
-            },
-            messages=[{
-                "role": "user",
-                "content": prompt
-            }],
-            betas=["output-128k-2025-02-19"],
-    ) as stream:
-        for event in stream:
-            if event.type == "content_block_start":
-                current_block = event.content_block.type
-
-                # Print the thinking tag when thinking block starts
-                if current_block == "thinking" and not thinking_started:
-                    print("<thinking>")
-                    thinking_started = True
-
-            elif event.type == "content_block_delta":
-                if event.delta.type == "thinking_delta":
-                    # Stream thinking content directly
-                    print(event.delta.thinking, end="", flush=True)
-
-                elif event.delta.type == "text_delta":
-                    # If we're transitioning from thinking to response
-                    if thinking_started and not response_started:
-                        print("</thinking>\n")
-                        response_started = True
-
-                    # Stream response content directly
-                    print(event.delta.text, end="", flush=True)
-                    full_response += event.delta.text
-
-            elif event.type == "content_block_stop":
-                if current_block == "thinking" and not response_started:
-                    print("</thinking>\n")
-
-                current_block = None
-
-    # Save response to file
-    response_saver.save_response(prompt, full_response, model)
-
-    return full_response
-
-
 def print_colored(text, color):
     print(f"{color}{text}{RESET}", end="", flush=True)
 
@@ -821,7 +771,7 @@ def load_prompt_from_file(filename, model="claude-3-7-sonnet-latest"):
             # Count tokens
             token_count = count_tokens(prompt, model)
 
-            print_colored(f"Loaded {filename} ({token_count} tokens)\n", YELLOW)
+            print_colored(f"Loaded {filename} ({token_count} tokens)\n", GREEN)
             return prompt
     except Exception as e:
         print_colored(f"Error loading {filename}: {str(e)}\n", RED)
@@ -843,7 +793,7 @@ def run_openai_query(prompt, api_key=None, model="o3-mini", key_file="apikeys.js
 
     # Only pass reasoning_effort if the model supports it
     if reasoning_effort is not None and not config.get("supports_reasoning", False):
-        print_colored(f"Note: {model} does not support reasoning_effort. This parameter will be ignored.\n", YELLOW)
+        print_colored(f"Note: {model} does not support reasoning_effort. This parameter will be ignored.\n", RED)
         reasoning_effort = None
 
     openai_chat = OpenAIConversation(api_key, model=model, color=YELLOW, reasoning_effort=reasoning_effort)
@@ -864,9 +814,9 @@ def run_claude_query(prompt, api_key=None, model="claude-3-7-sonnet-latest", key
 
     # Log a note if thinking is not enabled but we're using the thinking function
     if not config.get("thinking_enabled", False):
-        print_colored(f"Note: {model} does not support thinking. Using standard API call.\n", YELLOW)
+        print_colored(f"Note: {model} does not support thinking. Using standard API call.\n", RED)
 
-    claude = ClaudeConversation(api_key, CYAN)
+    claude = ClaudeConversation(api_key, YELLOW)
     return claude.ask_with_thinking(prompt, model=model)
 
 
@@ -887,7 +837,7 @@ def run_gemini_query(prompt, api_key=None, model="gemini-2.0-flash", key_file="a
         gemini = GeminiConversation(api_key, model=model, color=YELLOW)
         return gemini.ask(prompt, max_tokens=max_tokens)
     except ImportError:
-        print_colored("Skipping Gemini (google-generativeai package not installed)\n", YELLOW)
+        print_colored("Skipping Gemini (google-generativeai package not installed)\n", RED)
         return None
     except Exception as e:
         print_colored(f"Error initializing Gemini: {str(e)}\n", RED)
