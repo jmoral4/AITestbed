@@ -152,7 +152,7 @@ class ResponseSaver:
         self.output_dir = output_dir
         os.makedirs(self.output_dir, exist_ok=True)
 
-    def save_response(self, prompt, response, model):
+    def save_response(self, prompt, response, model, reasoning_effort=None):
         """
         Save an AI response to a markdown file with the format:
         <timestamp:HHMMSS>.<model>.<first 50 chars of prompt>.md
@@ -175,7 +175,10 @@ class ResponseSaver:
         model_clean = re.sub(r'[^a-zA-Z0-9]', '', model)
 
         # Create filename
-        filename = f"{timestamp}.{model_clean}.{prompt_part}.md"
+        if reasoning_effort is not None:
+            filename = f"{timestamp}.{model_clean}.{reasoning_effort}.{prompt_part}.md"
+        else:
+            filename = f"{timestamp}.{model_clean}.{prompt_part}.md"
 
         # Full path to file
         file_path = os.path.join(self.output_dir, filename)
@@ -183,7 +186,8 @@ class ResponseSaver:
         # Write response to file
         with open(file_path, 'w', encoding='utf-8') as f:
             f.write(f"# Prompt: {prompt}\n\n")
-            f.write(f"## Model: {model}\n\n")
+            model_line = f"## Model: {model} ({reasoning_effort})" if reasoning_effort is not None else f"## Model: {model}"
+            f.write(model_line + "\n\n")
             f.write(response)
 
         print(f"Response saved to: {file_path}")
@@ -385,6 +389,8 @@ class ClaudeConversation:
         self.conversation_history.append({"role": "user", "content": prompt})
         self.conversation_history.append({"role": "assistant", "content": full_response})
 
+        print(RESET)
+        print
         # Save response to file
         response_saver.save_response(prompt, full_response, model)
 
@@ -502,7 +508,9 @@ class OpenAIConversation:
                 break
             role_user_prompt = follow_up_prompt
 
-        response_saver.save_response(prompt, full_answer, model)
+        print(RESET)
+        print()
+        response_saver.save_response(prompt, full_answer, model, self.reasoning_effort)
         return full_answer
     # --------------------------------------------------------------------- #
 
@@ -763,6 +771,8 @@ class GeminiConversation:
             # Add the response to conversation history for tracking
             self.conversation_history.append({"role": "assistant", "content": full_response})
 
+            print(RESET)
+            print
             # Save response to file
             response_saver.save_response(prompt, full_response, model or self.model)
 
