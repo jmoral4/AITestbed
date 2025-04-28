@@ -1,151 +1,162 @@
-# concurrent_ai_test.py - Spawns separate windows for each AI model
-
+# concurrent_ai_test.py  •  spawn separate windows for multiple AI models
 import subprocess
 import sys
 import os
 import argparse
+import time
 
+# ──────────────────────────────────────────────────────────────────── helpers
 
-def check_windows_terminal():
-    """Check if Windows Terminal is available"""
+def check_windows_terminal() -> bool:
+    """Return True if Windows Terminal is installed."""
     try:
-        # Try to run 'wt --version' to see if Windows Terminal is installed
-        result = subprocess.run(['wt', '--version'],
-                                stdout=subprocess.PIPE,
-                                stderr=subprocess.PIPE,
-                                text=True,
-                                creationflags=subprocess.CREATE_NO_WINDOW)
-        return result.returncode == 0
+        res = subprocess.run(['wt', '--version'],
+                             stdout=subprocess.PIPE,
+                             stderr=subprocess.PIPE,
+                             text=True,
+                             creationflags=subprocess.CREATE_NO_WINDOW)
+        return res.returncode == 0
     except FileNotFoundError:
         return False
-    except Exception:
-        return False
 
 
-def run_in_windows_terminal(title, command, working_dir, is_first=False):
-    """Run a command in a new Windows Terminal tab with specified working directory"""
+def run_in_windows_terminal(title: str, cmd: str, cwd: str, first: bool = False):
+    """Open *cmd* in a new Windows-Terminal tab (new window for the first tab)."""
     try:
-        if is_first:
-            # For the first window, create a new window without targeting any existing window
-            subprocess.Popen(['wt', 'nt', '--title', title, '-d', working_dir, 'cmd', '/c', command])
+        if first:
+            subprocess.Popen(['wt', 'nt', '--title', title, '-d', cwd,
+                              'cmd', '/c', cmd])
         else:
-            # For subsequent tabs, target the existing window
-            subprocess.Popen(['wt', '-w', '0', 'nt', '--title', title, '-d', working_dir, 'cmd', '/c', command])
-            # Add a small delay to allow the window to initialize
-            import time
-            time.sleep(0.5)
-    except Exception as e:
-        print(f"First Windows Terminal method failed: {e}")
-        try:
-            # Fall back to older syntax if the first one fails
-            subprocess.Popen(['wt', 'new-tab', '--title', title, '-d', working_dir, '--', 'cmd', '/c', command])
-        except Exception as e:
-            print(f"Second Windows Terminal method failed: {e}")
-            # If all else fails, use CMD as a fallback
-            run_in_cmd(title, command, working_dir)
+            subprocess.Popen(['wt', '-w', '0', 'nt', '--title', title, '-d', cwd,
+                              'cmd', '/c', cmd])
+            time.sleep(0.5)          # give the tab time to appear
+    except Exception as e1:
+        print(f"[WT] primary launch failed → {e1}")
+        try:  # older syntax
+            subprocess.Popen(['wt', 'new-tab', '--title', title, '-d', cwd,
+                              '--', 'cmd', '/c', cmd])
+        except Exception as e2:
+            print(f"[WT] fallback failed → {e2}")
+            run_in_cmd(title, cmd, cwd)
 
 
-def run_in_cmd(title, command, working_dir):
-    """Run a command in a new CMD window with specified working directory"""
-    # Use /D flag to set working directory
-    subprocess.Popen(f'start "{title}" cmd /c "cd /D "{working_dir}" && {command}"', shell=True)
+def run_in_cmd(title: str, cmd: str, cwd: str):
+    subprocess.Popen(
+        f'start "{title}" cmd /c "cd /D \"{cwd}\" && {cmd}"',
+        shell=True)
+
+# ──────────────────────────────────────────────────────────────────── CLI
+
+def parse_openai_specs(tokens):
+    """
+    Yield (model_name, effort|None) tuples from a list of spec strings.
+    Accepts comma-separated or space-separated tokens:  ["o3:high", "o4-mini:high"]
+    """
+    for token in tokens:
+        for raw in token.split(','):
+            raw = raw.strip()
+            if not raw:
+                continue
+            if ':' in raw:
+                name, effort = raw.split(':', 1)
+                yield name, effort.lower()
+            else:
+                yield raw, None
 
 
-def main(args=None):
-    parser = argparse.ArgumentParser(description='Run AI models concurrently in separate windows')
-    parser.add_argument('--prompt-file', required=True, help='File containing the prompt')
-    parser.add_argument('--system-prompt-file', help='File containing the system prompt for Ollama')
-    parser.add_argument('--openai-model', default='o3-mini', help='OpenAI model to use')
-    parser.add_argument('--claude-model', default='claude-3-7-sonnet-latest', help='Claude model to use')
-    parser.add_argument('--ollama-model', default='llama3.1', help='Ollama model to use')
-    parser.add_argument('--gemini-model', default='gemini-2.0-flash', help='gemini model to use')
-    parser.add_argument('--reasoning-effort', help='Reasoning effort for OpenAI (high, medium, low)')
+def main(argv=None):
+    p = argparse.ArgumentParser(
+        description="Run many AI models concurrently in separate Windows-Terminal tabs")
 
-    # If args is provided, parse them, otherwise use sys.argv
-    parsed_args = parser.parse_args(args)
+    p.add_argument('--prompt-file', required=True,
+                   help='File containing the prompt')
+    p.add_argument('--system-prompt-file',
+                   help='System prompt file for Ollama (optional)')
 
-    # Check if prompt file exists
-    if not os.path.exists(parsed_args.prompt_file):
-        print(f"Error: Prompt file '{parsed_args.prompt_file}' does not exist.")
-        return
+    # ⇢ new
+    p.add_argument('--openai-models', nargs='*',
+                   help='Space/comma list of OpenAI model specs, '
+                        'e.g.  o3:low o3:high o4-mini:high')
 
-    # Check if system prompt file exists (if specified)
-    if parsed_args.system_prompt_file and not os.path.exists(parsed_args.system_prompt_file):
-        print(f"Warning: System prompt file '{parsed_args.system_prompt_file}' does not exist.")
+    # ⇢ legacy (kept for compatibility)
+    p.add_argument('--openai-model', default='o3-mini',
+                   help='Single OpenAI model (legacy)')
+    p.add_argument('--reasoning-effort',
+                   help='Reasoning effort for the legacy single model')
 
-    # Get script directory - this is where apikeys.json should be
-    script_dir = os.path.dirname(os.path.abspath(__file__))
+    # Other vendors (unchanged)
+    p.add_argument('--claude-model', default='claude-3-7-sonnet-latest')
+    p.add_argument('--ollama-model', default='llama3.1')
+    p.add_argument('--gemini-model', default='gemini-2.0-flash')
 
-    # Check if apikeys.json exists for OpenAI and Claude
-    api_keys_path = os.path.join(script_dir, 'apikeys.json')
-    if not os.path.exists(api_keys_path):
-        print(f"Warning: 'apikeys.json' not found in {script_dir}")
-        print("OpenAI and Claude runners may fail.")
-    else:
-        print(f"Found API keys file: {api_keys_path}")
+    args = p.parse_args(argv)
 
-    # Get the absolute path to the prompt file
-    prompt_file = os.path.abspath(parsed_args.prompt_file)
-    prompt_arg = f'--prompt-file "{prompt_file}"'
+    # ───────────────────────────── pre-flight
 
-    # System prompt argument
-    system_prompt_arg = ''
-    if parsed_args.system_prompt_file:
-        system_prompt_file = os.path.abspath(parsed_args.system_prompt_file)
-        system_prompt_arg = f'--system-prompt-file "{system_prompt_file}"'
+    if not os.path.exists(args.prompt_file):
+        sys.exit(f"❌ Prompt file '{args.prompt_file}' not found.")
 
-    # Reasoning effort argument for OpenAI
-    reasoning_arg = f'--reasoning-effort {parsed_args.reasoning_effort}' if parsed_args.reasoning_effort else ""
+    if args.system_prompt_file and not os.path.exists(args.system_prompt_file):
+        print(f"⚠️  System prompt file '{args.system_prompt_file}' not found; "
+              "Ollama may ignore it.")
 
-    # Get the path to the ai_runner.py script
-    # Assuming it's in the same directory as this script
-    runner_script = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'ai_runner.py')
+    script_dir   = os.path.dirname(os.path.abspath(__file__))
+    runner_py    = os.path.join(script_dir, 'ai_runner.py')
+    python_exe   = sys.executable
+    prompt_path  = os.path.abspath(args.prompt_file)
+    prompt_arg   = f'--prompt-file "{prompt_path}"'
 
-    # Get Python executable
-    python_exe = sys.executable
+    # ───────────────────────────── assemble OpenAI commands
 
-    # Check if Windows Terminal is available
-    use_windows_terminal = True
+    if args.openai_models:
+        openai_specs = list(parse_openai_specs(args.openai_models))
+    else:  # backwards compatible single-model path
+        openai_specs = [(args.openai_model, args.reasoning_effort)]
 
-    # Use double quotes around the entire command to handle paths with spaces
-    openai_cmd = f'{python_exe} "{runner_script}" --model openai --model-name {parsed_args.openai_model} {prompt_arg} {reasoning_arg} --wait'
-    claude_cmd = f'{python_exe} "{runner_script}" --model claude --model-name {parsed_args.claude_model} {prompt_arg} --wait'
-    ollama_cmd = f'{python_exe} "{runner_script}" --model ollama --model-name {parsed_args.ollama_model} {prompt_arg} {system_prompt_arg} --wait'
-    gemini_cmd = f'{python_exe} "{runner_script}" --model gemini --model-name {parsed_args.gemini_model} {prompt_arg} --wait'
+    openai_cmds = []
+    for model_name, effort in openai_specs:
+        effort_arg = f'--reasoning-effort {effort}' if effort else ''
+        cmd = (f'{python_exe} "{runner_py}" --model openai '
+               f'--model-name {model_name} {prompt_arg} {effort_arg} --wait')
+        openai_cmds.append((model_name, cmd))
 
-    print(f"Using prompt file: {prompt_file}")
+    # ───────────────────────────── assemble other vendor commands
 
-    # Run the commands in separate windows
-    # Pass the script directory as the working directory to ensure API keys are found
-    if use_windows_terminal:
-        print("Using Windows Terminal to spawn separate tabs...")
-        # First window without targeting an existing window
-        run_in_windows_terminal(f"OpenAI ({parsed_args.openai_model})", openai_cmd, script_dir, is_first=True)
-        # Small delay to ensure the first window is created
-        import time
-        time.sleep(1)
-        # Subsequent tabs targeting the existing window
-        run_in_windows_terminal(f"Claude ({parsed_args.claude_model})", claude_cmd, script_dir)
-        #run_in_windows_terminal(f"Ollama ({parsed_args.ollama_model})", ollama_cmd, script_dir)
-        run_in_windows_terminal(f"Gemini ({parsed_args.gemini_model})", gemini_cmd, script_dir)
-    else:
-        print("Using CMD to spawn separate windows...")
-        run_in_cmd(f"OpenAI ({parsed_args.openai_model})", openai_cmd, script_dir)
-        run_in_cmd(f"Claude ({parsed_args.claude_model})", claude_cmd, script_dir)
-        #run_in_cmd(f"Ollama ({parsed_args.ollama_model})", ollama_cmd, script_dir)
-        run_in_cmd(f"Gemini ({parsed_args.gemini_model})", gemini_cmd, script_dir)
+    claude_cmd = (f'{python_exe} "{runner_py}" --model claude '
+                  f'--model-name {args.claude_model} {prompt_arg} --wait')
 
-    print("All AI model processes have been started in separate windows.")
-    print("If any model fails, check that apikeys.json exists and contains valid API keys.")
+    gemini_cmd = (f'{python_exe} "{runner_py}" --model gemini '
+                  f'--model-name {args.gemini_model} {prompt_arg} --wait')
+
+    # ollama_cmd = (f'{python_exe} "{runner_py}" --model ollama '
+    #               f'--model-name {args.ollama_model} {prompt_arg} '
+    #               f'{("--system-prompt-file " + os.path.abspath(args.system_prompt_file)) if args.system_prompt_file else ""} '
+    #               f'--wait')
+
+    # ───────────────────────────── spawn windows
+
+    print(f"🔹 Using prompt: {prompt_path}")
+    first = True
+    for mdl, cmd in openai_cmds:
+        run_in_windows_terminal(f"OpenAI ({mdl})", cmd, script_dir, first)
+        first = False
+
+    run_in_windows_terminal(f"Claude ({args.claude_model})", claude_cmd, script_dir, first)
+    run_in_windows_terminal(f"Gemini ({args.gemini_model})", gemini_cmd, script_dir)
+    # Uncomment if you want Ollama as well
+    # run_in_windows_terminal(f"Ollama ({args.ollama_model})", ollama_cmd, script_dir)
+
+    print("🚀 All AI processes launched. Check each tab for output.")
 
 
 if __name__ == "__main__":
-    # Call main with command line arguments as a list
-    main(["--prompt-file", "prompt.txt",
-          "--openai-model", "o3", "--reasoning-effort", "low",
-          "--claude-model", "claude-3-7-sonnet-latest",
-          #"--ollama-model", "mistral-nemo",
-          "--gemini-model", "gemini-2.5-pro-preview-03-25"])
+    # Example call: three OpenAI variants + Claude + Gemini
+    main([
+        "--prompt-file", "prompt.txt",
+        "--openai-models", "o3:low", "o3:high", "o4-mini:high",
+        "--claude-model", "claude-3-7-sonnet-latest",
+        "--gemini-model", "gemini-2.5-pro-preview-03-25"
+    ])
 
             # Other Options
             # gemini-2.5-pro-exp-03-25
