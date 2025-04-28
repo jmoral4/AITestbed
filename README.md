@@ -4,7 +4,7 @@ A flexible toolkit for testing and comparing responses from multiple AI models (
 
 ## KNOWN ISSUES AND WORKAROUNDS
 There is a bug where the concurrent terminals will clip long responses due to some combination of terminal buffer and py/c buffering.
-*  There response is not LOST. Those responses are stored in the /responses/ output and can be fully read. If you get an incomplete response on a large request (like refactoring) please look in the /responses/ directory. -- I am working on a patch that hopefully works with Windows Terminal as well as classic command terminal. 
+*  *There response is not LOST*. Those responses are stored in the /responses/ output and can be fully read. If you get an incomplete response on a large request (like refactoring) please look in the /responses/ directory. -- I am working on a patch that hopefully works with Windows Terminal as well as classic command terminal. 
 
 ## Screenshot
 ![image](https://github.com/user-attachments/assets/bb30ee12-8925-4637-a684-7e0bd295b9fc)
