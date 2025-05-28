@@ -148,7 +148,7 @@ Any model can be added with a simple json config entry in `aitestbed.py` like so
         "max_tokens": 8192,
     }
 ```
-Models without configs fallback to 4096 context size but otherwise work fine.
+Models without configs fallback to 4096 context size but otherwise work fine. Note: This means models that are "undefined" will clip output to 4096.
 
 ### Preconfigured Models
 #### OpenAI
