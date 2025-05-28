@@ -26,6 +26,10 @@ MODEL_CONFIGS = {
         "max_tokens": 16384,
         "supports_reasoning": False,
     },
+    "gpt-4.1": {
+        "max_tokens": 32768,
+        "supports_reasoning": False,
+    },
     "o3-mini": {
         "max_tokens": 100000,
         "supports_reasoning": True,
@@ -48,6 +52,12 @@ MODEL_CONFIGS = {
         "thinking_budget": 32000,
         "max_tokens_with_thinking": 128000,
     },
+    "claude-sonnet-4-20250514": {
+        "max_tokens": 200000,
+        "thinking_enabled": True,
+        "thinking_budget": 32000,
+        "max_tokens_with_thinking": 128000,
+    },
     "claude-3-5-haiku-latest": {
         "max_tokens": 100000,
         "thinking_enabled": False,
@@ -56,6 +66,9 @@ MODEL_CONFIGS = {
         "max_tokens": 65636,
     },
     "gemini-2.5-pro-preview-03-25": {
+        "max_tokens": 65636,
+    },
+    "gemini-2.5-pro-preview-05-06":{
         "max_tokens": 65636,
     },
     "gemini-2.0-flash": {
