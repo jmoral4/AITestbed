@@ -53,10 +53,10 @@ MODEL_CONFIGS = {
         "max_tokens_with_thinking": 128000,
     },
     "claude-sonnet-4-20250514": {
-        "max_tokens": 200000,
+        "max_tokens": 64000,
         "thinking_enabled": True,
         "thinking_budget": 32000,
-        "max_tokens_with_thinking": 128000,
+        "max_tokens_with_thinking": 64000,
     },
     "claude-3-5-haiku-latest": {
         "max_tokens": 100000,
