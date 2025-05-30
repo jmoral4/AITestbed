@@ -148,7 +148,7 @@ Any model can be added with a simple json config entry in `aitestbed.py` like so
         "max_tokens": 8192,
     }
 ```
-Models without configs fallback to 4096 context size but otherwise work fine.
+Models without configs fallback to 4096 context size but otherwise work fine. Note: This means models that are "undefined" will clip output to 4096.
 
 ### Preconfigured Models
 #### OpenAI
@@ -171,6 +171,61 @@ Models without configs fallback to 4096 context size but otherwise work fine.
 - llama3.1
 - gemma3
 - (and any other models you have installed locally)
+
+Certainly! Here's the section formatted in Markdown:
+
+````markdown
+## Helper Script: Collecting Codebase Files for Prompt Context
+
+To simplify the process of collecting C# source files from your codebase into a single prompt context, a helper script is included: `prep_context.py`.
+
+### Purpose
+This script helps you:
+- Scan a directory (optionally recursive) for `.cs` files (or any files you define)
+- Interactively select which files to include
+- Output a single combined `prompt_context.txt` that can be used with AI models in your prompt.txt file.
+
+### Usage
+
+```bash
+python prep_context.py ./myproject -r -o prompt_context.txt
+````
+
+**Arguments:**
+
+* `directory` *(required)*: Path to the directory where `.cs` files are located.
+* `-r`, `--recursive`: Search subdirectories recursively.
+* `-o`, `--output`: Output filename (default: `prompt_context.txt`)
+
+### Features
+
+* Interactive selection of files (choose individual files or type `all`)
+* Adds clear file headers (based on filenames) to separate content blocks
+* Handles invalid input gracefully and ensures consistent formatting for AI consumption
+
+### Example Output Snippet
+
+```
+--------------
+MyClass.cs
+--------------
+public class MyClass {
+    public void DoSomething() {
+        Console.WriteLine("Hello, world!");
+    }
+}
+
+--------------
+Program.cs
+--------------
+static void Main(string[] args) {
+    var obj = new MyClass();
+    obj.DoSomething();
+}
+```
+
+This file can then be used as your `prompt.txt` or appended to a larger task instruction for more complex AI prompts.
+
 
 ## Advanced Usage
 ### Model Configuration
