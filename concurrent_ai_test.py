@@ -153,9 +153,9 @@ if __name__ == "__main__":
     # Example call: three OpenAI variants + Claude + Gemini
     main([
         "--prompt-file", "prompt.txt",
-        "--openai-models", "o3:low", "o3:high", "o4-mini:high",
+        "--openai-models", "o3:high", "gpt-4.1",
         "--claude-model", "claude-3-7-sonnet-latest",
-        "--gemini-model", "gemini-2.5-pro-preview-03-25"
+        "--gemini-model", "gemini-2.5-pro-preview-05-06"
     ])
 
             # Other Options

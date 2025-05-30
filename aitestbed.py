@@ -26,6 +26,10 @@ MODEL_CONFIGS = {
         "max_tokens": 16384,
         "supports_reasoning": False,
     },
+    "gpt-4.1": {
+        "max_tokens": 32768,
+        "supports_reasoning": False,
+    },
     "o3-mini": {
         "max_tokens": 100000,
         "supports_reasoning": True,
@@ -56,6 +60,9 @@ MODEL_CONFIGS = {
         "max_tokens": 65636,
     },
     "gemini-2.5-pro-preview-03-25": {
+        "max_tokens": 65636,
+    },
+    "gemini-2.5-pro-preview-05-06":{
         "max_tokens": 65636,
     },
     "gemini-2.0-flash": {
@@ -449,7 +456,7 @@ class OpenAIConversation:
         follow_up_prompt = "Please continue."
         continue_loops = 0
         role_user_prompt = prompt
-        cumulative_output_tokens = 0  # <-- NEW
+        cumulative_output_tokens = 0
 
         while True:
             # ---------- build message list that fits -------------------- #
