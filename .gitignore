@@ -26,6 +26,10 @@ share/python-wheels/
 *.egg
 MANIFEST
 
+# output directories
+other/
+prompt_context.txt
+
 # Pycharm
 .idea/
 
