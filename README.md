@@ -4,7 +4,7 @@ A flexible toolkit for testing and comparing responses from multiple AI models (
 
 ## Screenshot
 ### GUI
-![image](https://github.com/user-attachments/assets/2846dffd-d07c-406b-b14e-9bb289d188f2)
+![image](https://github.com/user-attachments/assets/453549d9-2f8c-42ec-b6e8-d9c79bdcaae4)
 
 (see: readme_gui.md)[https://github.com/jmoral4/AITestbed/blob/main/README_GUI.md]
 
