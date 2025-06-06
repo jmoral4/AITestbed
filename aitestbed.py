@@ -51,17 +51,20 @@ MODEL_CONFIGS = {
         "thinking_enabled": True,
         "thinking_budget": 32000,
         "max_tokens_with_thinking": 128000,
+        "beta_flags":"output-128k-2025-02-19"
     },
-    "claude-sonnet-4-20250514": {
-        "max_tokens": 64000,
-        "thinking_enabled": True,
-        "thinking_budget": 32000,
-        "max_tokens_with_thinking": 64000,
-    },
-    "claude-3-5-haiku-latest": {
-        "max_tokens": 100000,
-        "thinking_enabled": False,
-    },
+    "claude-sonnet-4-0": {
+                        "context_window":200_000,
+                        "max_tokens": 64_000,
+                        "thinking_enabled": True,
+                        "thinking_budget": 30_000,  # safe default
+                        "max_tokens_with_thinking": 64_000},
+    "claude-opus-4-0": {  # Opus is sadly half as useful as sonnet in terms of tokens, despite being smarter :(
+                        "context_window":200_000,
+                        "max_tokens": 32_000,
+                        "thinking_enabled": True,
+                        "thinking_budget": 15_000,
+                        "max_tokens_with_thinking": 32_000},
     "gemini-2.5-pro-exp-03-25": {
         "max_tokens": 65636,
     },
@@ -101,6 +104,38 @@ def get_model_config(model_name):
     return MODEL_CONFIGS.get(model_name, DEFAULT_CONFIG)
 
 
+def get_available_models():
+    """Get all available models organized by provider"""
+    models_by_provider = {
+        "OpenAI": [],
+        "Claude": [],
+        "Gemini": [],
+        "Ollama": []
+    }
+    
+    for model_name in MODEL_CONFIGS.keys():
+        config = MODEL_CONFIGS[model_name]
+        model_info = {
+            "name": model_name,
+            "max_tokens": config.get("max_tokens", 4096),
+            "context_window": config.get("context_window", "N/A"),
+            "supports_reasoning": config.get("supports_reasoning", False),
+            "thinking_enabled": config.get("thinking_enabled", False),
+            "thinking_budget": config.get("thinking_budget", "N/A")
+        }
+        
+        if model_name.startswith(("gpt-", "o3-", "o4-", "o1")) or model_name == "o3":
+            models_by_provider["OpenAI"].append(model_info)
+        elif model_name.startswith("claude-"):
+            models_by_provider["Claude"].append(model_info)
+        elif model_name.startswith("gemini-"):
+            models_by_provider["Gemini"].append(model_info)
+        else:
+            models_by_provider["Ollama"].append(model_info)
+    
+    return models_by_provider
+
+
 def count_tokens(text, model="claude-3-7-sonnet-latest"):
     """
     Estimate token count for a given text using tiktoken.
@@ -113,31 +148,7 @@ def count_tokens(text, model="claude-3-7-sonnet-latest"):
         int: Estimated token count
     """
     try:
-
-
-        # Map model names to encoding types
-        # This is a simplified mapping; add more as needed
-        model_to_encoding = {
-            # OpenAI models generally use cl100k_base for newer models
-            "gpt-4o": "cl100k_base",
-            "o3-mini": "cl100k_base",
-            "o1": "cl100k_base",
-
-            # Claude models - we'll use cl100k as approximation
-            "claude-3-7-sonnet-latest": "cl100k_base",
-            "claude-3-5-haiku-latest": "cl100k_base",
-
-            # Gemini models - use cl100k as approximation
-            "gemini-2.5-pro-exp-03-25": "cl100k_base",
-            "gemini-2.0-flash": "cl100k_base",
-
-            # Default for other models
-            "default": "cl100k_base"
-        }
-
-        # Get the encoding type based on model
-        encoding_name = model_to_encoding.get(model, model_to_encoding["default"])
-        encoding = tiktoken.get_encoding(encoding_name)
+        encoding = tiktoken.get_encoding("cl100k_base")
 
         # Count tokens
         tokens = encoding.encode(text)
@@ -318,16 +329,21 @@ class ClaudeConversation:
 
         # Get model configuration
         config = get_model_config(model)
+        # Ensure we never exceed the model’s output ceiling
+
 
         # Use provided values or fall back to config
         if max_tokens is None:
             if config.get("thinking_enabled", False):
-                max_tokens = config.get("max_tokens_with_thinking", 30720)
+                max_tokens = config.get("max_tokens_with_thinking", 64_000)
             else:
-                max_tokens = config.get("max_tokens", 30720)
+                max_tokens = config.get("max_tokens", 32_000)
 
         if thinking_budget is None:
-            thinking_budget = config.get("thinking_budget", 32000)
+            thinking_budget = config.get("thinking_budget", 30_000)
+
+        output_ceiling = config.get("max_tokens", 64_000)
+        max_tokens = min(max_tokens, output_ceiling)
 
         # Create messages array with conversation history plus new prompt
         messages = self.conversation_history + [
@@ -343,14 +359,13 @@ class ClaudeConversation:
 
         # Only enable thinking if the model supports it
         thinking_params = {}
-        if config.get("thinking_enabled", False):
+        if config.get("thinking_enabled"):
             thinking_params = {
-                "thinking": {
-                    "type": "enabled",
-                    "budget_tokens": thinking_budget
-                },
-                "betas": ["output-128k-2025-02-19"]
+                "thinking": {"type": "enabled",
+                             "budget_tokens": config.get("thinking_budget", 30_000)}
             }
+            if config.get("beta_flags"):  # new optional key
+                thinking_params["betas"] = config["beta_flags"]
 
         with self.client.beta.messages.stream(
                 model=model,
@@ -447,72 +462,126 @@ class OpenAIConversation:
     # --------------------------------------------------------------------- #
     def ask(self, prompt: str, model: str | None = None, max_completion_tokens: int | None = None) -> str:
         """
-        Send `prompt` to the model, trimming history if needed and automatically
-        issuing “continue” follow-ups when the model hits the length cap.
+        Send `prompt` to the model, streaming the response, trimming history if needed,
+        and automatically issuing “continue” follow-ups when the model hits the length cap.
         """
         if self.client is None:
             raise ValueError("OpenAI client not initialised.")
 
-        model = model or self.model
-        cfg = get_model_config(model)
-        ctx_limit = cfg.get("max_tokens", 4096)
-        max_completion_tokens = max_completion_tokens or ctx_limit // 4  # heuristic
+        model_to_use = model or self.model  # Use a different variable name to avoid confusion with the 'model' module
+        cfg = get_model_config(model_to_use)
+        ctx_limit = cfg.get("max_tokens", 4096)  # This is context window
+
+        # max_completion_tokens should be what the API call expects
+        # For OpenAI, this is 'max_tokens' in the API call itself.
+        # Let's rename the parameter for clarity or ensure it's used correctly.
+        # Your current code uses `max_completion_tokens` for the API call, which is good.
+        # If `max_completion_tokens` is None, use a heuristic.
+        effective_max_tokens = max_completion_tokens or cfg.get("max_tokens_output",
+                                                                ctx_limit // 4)  # Using a new config field or heuristic
 
         full_answer = ""
         follow_up_prompt = "Please continue."
         continue_loops = 0
         role_user_prompt = prompt
-        cumulative_output_tokens = 0
+        cumulative_output_tokens = 0  # For debug tracking
+
+        spinner = Halo(  # Add a spinner for OpenAI as well
+            text=f'Waiting for response from {model_to_use}...',
+            spinner='dots',
+            color='yellow'
+        )
+        first_chunk_received = False
 
         while True:
             # ---------- build message list that fits -------------------- #
             hist = _shrink_history_to_fit(
                 self.conversation_history.copy(),
                 role_user_prompt,
-                model,
+                model_to_use,  # Pass the correct model name
                 ctx_limit,
-                max_completion_tokens,
+                effective_max_tokens,  # Use the calculated max tokens for completion
             )
             messages = hist + [{"role": "user", "content": role_user_prompt}]
 
             params = {
-                "model": model,
+                "model": model_to_use,
                 "messages": messages,
-                "max_completion_tokens": max_completion_tokens,
+                "max_completion_tokens": effective_max_tokens,  # API param is 'max_tokens' for output limit
+                "stream": True  # <--- ENABLE STREAMING HERE
             }
             if cfg.get("supports_reasoning") and self.reasoning_effort:
                 params["reasoning_effort"] = self.reasoning_effort
 
-            response = self.client.chat.completions.create(**params)
+            if not first_chunk_received:  # Start spinner only for the initial part of a potentially long response
+                spinner.start()
 
-            choice = response.choices[0]
-            part_text = choice.message.content
-            finish_reason = choice.finish_reason
-            api_comp_tok = getattr(response.usage, "completion_tokens", None)
+            print(f"Executing:{model_to_use} call with Max_Completion_Tokens:{max_completion_tokens} Streaming:{True} Supports_Reasoning:{self.reasoning_effort} Reasoning_Effort:{self.reasoning_effort}")
+            stream_response_content = ""
+            current_finish_reason = None
+            api_usage_stats = None  # To store usage data from the stream if available
 
-            # ---- DEBUG: token counting ---------------------------------------- #
-            part_tokens = count_tokens(part_text, model)
+            try:
+                response_stream = self.client.chat.completions.create(**params)
+                for chunk in response_stream:
+                    if not first_chunk_received:
+                        spinner.stop()
+                        first_chunk_received = True
+                        if self.color:  # Start color if specified
+                            print(self.color, end="", flush=True)
+
+                    if chunk.choices:
+                        delta = chunk.choices[0].delta
+                        content_piece = delta.content
+
+                        if content_piece:
+                            print_colored(content_piece, self.color if self.color else RESET)  # Use RESET if no color
+                            stream_response_content += content_piece
+
+                        if chunk.choices[0].finish_reason:
+                            current_finish_reason = chunk.choices[0].finish_reason
+
+                    # OpenAI often sends usage stats in the last chunk with stream=True
+                    # or in a separate event if using event streams more directly.
+                    # For basic streaming, it might be on the chunk if finish_reason is set.
+                    if hasattr(chunk, 'usage') and chunk.usage:
+                        api_usage_stats = chunk.usage
+
+
+            except Exception as e:
+                spinner.stop()  # Ensure spinner stops on error
+                print_colored(f"\nError during OpenAI API call: {e}\n", RED)
+                return f"Error: {e}"  # Or handle more gracefully
+
+            if not first_chunk_received:  # If loop exited before receiving anything (e.g. error before stream)
+                spinner.stop()
+
+            full_answer += stream_response_content
+
+            # ---- DEBUG: token counting (adjust for streaming) ---- #
+            part_tokens = count_tokens(stream_response_content, model_to_use)  # Tokenize the streamed part
             cumulative_output_tokens += part_tokens
+
+            # Try to get completion tokens from usage if available, otherwise estimate
+            api_comp_tok = api_usage_stats.completion_tokens if api_usage_stats and hasattr(api_usage_stats,
+                                                                                            'completion_tokens') else part_tokens
+
             debug_msg = (
                 f"\n[DEBUG]"
-                f" reason={finish_reason}"
-                f" | api_completion_tokens={api_comp_tok}"
-                f" | part_tokens={part_tokens}"
-                f" | cumulative={cumulative_output_tokens}"
+                f" reason={current_finish_reason}"
+                f" | api_completion_tokens={api_comp_tok}"  # This might be per segment if continued
+                f" | part_tokens_estimated={part_tokens}"
+                f" | cumulative_estimated={cumulative_output_tokens}"
                 f" | ctx_limit={ctx_limit}"
             )
             print_colored(debug_msg + "\n", CYAN)
-            # ------------------------------------------------------------------- #
+            # --------------------------------------------------------- #
 
-            print_colored(part_text, self.color)
-            full_answer += part_text
-
-            # ---- update history (unchanged) ----------------------------------- #
             self.conversation_history.append({"role": "user", "content": role_user_prompt})
-            self.conversation_history.append({"role": "assistant", "content": part_text})
+            self.conversation_history.append(
+                {"role": "assistant", "content": stream_response_content})  # Save the streamed part
 
-            # ---- follow-up loop logic (unchanged) ------------------------------ #
-            if finish_reason != "length":
+            if current_finish_reason != "length":
                 break
 
             continue_loops += 1
@@ -520,10 +589,11 @@ class OpenAIConversation:
                 print_colored("\n[Stopped after max_continue_loops]\n", RED)
                 break
             role_user_prompt = follow_up_prompt
+            first_chunk_received = False  # Reset for the next part of the conversation if "continue"
 
-        print(RESET)
+        print(RESET)  # Reset color at the very end
         print()
-        response_saver.save_response(prompt, full_answer, model, self.reasoning_effort)
+        response_saver.save_response(prompt, full_answer, model_to_use, self.reasoning_effort)
         return full_answer
     # --------------------------------------------------------------------- #
 
@@ -755,6 +825,7 @@ class GeminiConversation:
             # Use provided max_tokens or fall back to config
             if max_tokens is None:
                 max_tokens = config.get("max_tokens", 8192)
+
             print(f"MAX TOKENS:{max_tokens}")
             # Add the new prompt to conversation history for tracking
             self.conversation_history.append({"role": "user", "content": prompt})
@@ -764,7 +835,7 @@ class GeminiConversation:
                 prompt,
                 stream=True,
                 generation_config={
-                    "max_output_tokens": max_tokens,
+                    "max_output_tokens": max_tokens
                 }
             )
 
@@ -785,7 +856,7 @@ class GeminiConversation:
             self.conversation_history.append({"role": "assistant", "content": full_response})
 
             print(RESET)
-            print
+            print()
             # Save response to file
             response_saver.save_response(prompt, full_response, model or self.model)
 
@@ -826,7 +897,7 @@ def load_prompt_from_file(filename, model="claude-3-7-sonnet-latest"):
     return None
 
 
-def run_openai_query(prompt, api_key=None, model="o3-mini", key_file="apikeys.json", reasoning_effort=None):
+def run_openai_query(prompt, api_key=None, model="o4-mini", key_file="apikeys.json", reasoning_effort=None):
     """Run a query against OpenAI models"""
     if not api_key:
         key_manager = APIKeyManager(key_file)
@@ -868,7 +939,7 @@ def run_claude_query(prompt, api_key=None, model="claude-3-7-sonnet-latest", key
     return claude.ask_with_thinking(prompt, model=model)
 
 
-def run_gemini_query(prompt, api_key=None, model="gemini-2.0-flash", key_file="apikeys.json"):
+def run_gemini_query(prompt, api_key=None, model="gemini-2.5-flash", key_file="apikeys.json"):
     """Run a query against Google Gemini models"""
     if not api_key:
         key_manager = APIKeyManager(key_file)
@@ -965,9 +1036,9 @@ def main():
         print_colored("\n=== GEMINI RESPONSE ===\n", YELLOW)
         run_gemini_query(q)
 
-    # Ask Ollama
-    print_colored("\n=== OLLAMA RESPONSE ===\n", GREEN)
-    run_ollama_query(q, system_prompt=system_prompt)
+    # #Ask Ollama
+    # print_colored("\n=== OLLAMA RESPONSE ===\n", GREEN)
+    # run_ollama_query(q, system_prompt=system_prompt)
 
 
 if __name__ == "__main__":

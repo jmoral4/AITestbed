@@ -1,0 +1,33 @@
+# GUI Application Dependencies for AI Testbed
+# These are the external packages required by the aitestbed.py module
+
+# OpenAI API
+openai>=1.0.0
+
+# Anthropic Claude API
+anthropic>=0.25.0
+
+# Google Gemini API
+google-generativeai>=0.3.0
+
+# For token counting (OpenAI)
+tiktoken>=0.5.0
+
+# HTTP requests (for Ollama and general API calls)
+requests>=2.28.0
+
+# JSON handling is built-in to Python
+# Threading is built-in to Python
+# tkinter is built-in to Python (for GUI)
+# os, sys, subprocess, time, datetime are all built-in
+
+# For spinner/loading indicators in aitestbed.py
+halo>=0.0.31
+
+# Optional: For better error handling and logging
+colorama>=0.4.0
+
+# Note: 
+# - This assumes you have Python 3.8+ with tkinter support
+# - Ollama should be installed separately if you want to use local models
+# - You'll need to create an apikeys.json file with your API keys

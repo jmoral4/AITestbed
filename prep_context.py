@@ -234,7 +234,7 @@ def main():
 
     # ----------  test hook  ----------
     if len(sys.argv) == 1:                        # no CLI arguments supplied
-        sys.argv.extend([r"C:\git\myproj", "-r", "-e", "obj"])    # <- test values
+        sys.argv.extend([r"C:\git\your_project", "-r", "-e", "obj"])    # <- test values
     # ---------------------------------
 
     args = parser.parse_args()
