@@ -2,14 +2,11 @@
 
 A flexible toolkit for testing and comparing responses from multiple AI models (OpenAI, Claude, Gemini, and Ollama).
 
-## KNOWN ISSUES AND WORKAROUNDS
-There is a bug where the concurrent terminals will clip long responses due to some combination of terminal buffer and py/c buffering.
-*  *There response is not LOST*. Those responses are stored in the /responses/ output and can be fully read. If you get an incomplete response on a large request (like refactoring) please look in the /responses/ directory. -- I am working on a patch that hopefully works with Windows Terminal as well as classic command terminal. 
-
 ## Screenshot
-
 ### GUI
 ![image](https://github.com/user-attachments/assets/2846dffd-d07c-406b-b14e-9bb289d188f2)
+
+(see: readme_gui.md)[https://github.com/jmoral4/AITestbed/blob/main/README_GUI.md]
 
 ### CLI
 ![image](https://github.com/user-attachments/assets/bb30ee12-8925-4637-a684-7e0bd295b9fc)
