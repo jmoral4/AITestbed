@@ -68,6 +68,9 @@ MODEL_CONFIGS = {
     "gemini-2.5-pro-exp-03-25": {
         "max_tokens": 65636,
     },
+    "gemini-2.5-pro-preview-06-05":{
+        "max_tokens": 65636,  # Output tokens
+    },
     "gemini-2.5-pro-preview-03-25": {
         "max_tokens": 65636,
     },

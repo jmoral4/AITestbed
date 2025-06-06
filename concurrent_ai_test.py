@@ -155,7 +155,7 @@ if __name__ == "__main__":
         "--prompt-file", "prompt.txt",
         "--openai-models","o4-mini:high", "o3:high",
         "--claude-model", "claude-opus-4-0",
-        "--gemini-model", "gemini-2.5-pro-preview-05-06"
+        "--gemini-model", "gemini-2.5-pro-preview-06-05"
     ])
 
             # Other Options
