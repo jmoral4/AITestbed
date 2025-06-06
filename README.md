@@ -7,6 +7,11 @@ There is a bug where the concurrent terminals will clip long responses due to so
 *  *There response is not LOST*. Those responses are stored in the /responses/ output and can be fully read. If you get an incomplete response on a large request (like refactoring) please look in the /responses/ directory. -- I am working on a patch that hopefully works with Windows Terminal as well as classic command terminal. 
 
 ## Screenshot
+
+### GUI
+![image](https://github.com/user-attachments/assets/2846dffd-d07c-406b-b14e-9bb289d188f2)
+
+### CLI
 ![image](https://github.com/user-attachments/assets/bb30ee12-8925-4637-a684-7e0bd295b9fc)
 
 
