@@ -14,6 +14,7 @@ import time
 from datetime import datetime
 from typing import Dict, List, Optional
 from concurrent.futures import ThreadPoolExecutor, Future
+import tiktoken
 
 # Import our existing modules
 try:
@@ -150,8 +151,15 @@ class AITestbedGUI:
         self.context_status_label = ttk.Label(context_info_frame, text="No context loaded", foreground="gray")
         self.context_status_label.grid(row=0, column=1, sticky=tk.E)
         
+        # Token count display with label
+        token_info_frame = ttk.Frame(context_info_frame)
+        token_info_frame.grid(row=0, column=2, sticky=tk.E, padx=(15, 0))
+        ttk.Label(token_info_frame, text="Tokens:", foreground="gray").grid(row=0, column=0, sticky=tk.E)
+        self.token_count_label = ttk.Label(token_info_frame, text="0", foreground="gray", font=("TkDefaultFont", 9, "bold"))
+        self.token_count_label.grid(row=0, column=1, sticky=tk.E, padx=(3, 0))
+        
         self.context_text = scrolledtext.ScrolledText(context_info_frame, height=6, wrap=tk.WORD)
-        self.context_text.grid(row=1, column=0, columnspan=2, sticky=(tk.W, tk.E), pady=(5, 0))
+        self.context_text.grid(row=1, column=0, columnspan=3, sticky=(tk.W, tk.E), pady=(5, 0))
         self.context_text.config(state=tk.DISABLED)
         
         # Copy context button
@@ -368,6 +376,13 @@ class AITestbedGUI:
         self.context_status_label.config(
             text=f"{file_count} files loaded at {time_str}", 
             foreground="green"
+        )
+        
+        # Update token count
+        token_count = self.count_tokens(self.context_content)
+        self.token_count_label.config(
+            text=f"{token_count:,}",
+            foreground="blue"
         )
         
         # Update preview (first 2000 characters)
@@ -673,6 +688,25 @@ class AITestbedGUI:
             return provider_data
         else:
             return None
+    
+    def count_tokens(self, text):
+        """
+        Count tokens using tiktoken for accurate tokenization.
+        Uses GPT-4 encoding as a standard reference.
+        """
+        if not text:
+            return 0
+        
+        try:
+            # Use GPT-4 encoding as the standard (cl100k_base)
+            encoding = tiktoken.get_encoding("cl100k_base")
+            tokens = encoding.encode(text)
+            return len(tokens)
+        except Exception as e:
+            # Fallback to simple word-based estimation if tiktoken fails
+            print(f"Warning: tiktoken failed ({e}), using fallback estimation")
+            words = len(text.split())
+            return int(words / 0.75)  # Simple fallback
 
 def main():
     """Main entry point"""
