@@ -13,6 +13,7 @@ import json
 import time
 from datetime import datetime
 from typing import Dict, List, Optional
+from concurrent.futures import ThreadPoolExecutor, Future
 
 # Import our existing modules
 try:
@@ -36,7 +37,10 @@ class AITestbedGUI:
         self.context_timestamp = None
         self.selected_directory = ""
         self.model_conversations = {}
-        self.model_threads = {}
+        self.model_futures = {}
+        
+        # Initialize thread pool executor for parallel model requests
+        self.executor = ThreadPoolExecutor(max_workers=8)
         
         # Load available models from aitestbed.py
         self.available_models = get_available_models()
@@ -69,7 +73,20 @@ class AITestbedGUI:
         
         self.setup_ui()
         self.api_key_manager = None
+        
+        # Ensure cleanup on window close
+        self.root.protocol("WM_DELETE_WINDOW", self._on_closing)
         self.check_api_keys()
+    
+    def _on_closing(self):
+        """Handle application closing - cleanup thread pool"""
+        try:
+            # Shutdown the executor
+            self.executor.shutdown(wait=False)
+        except:
+            pass
+        finally:
+            self.root.destroy()
     
     def setup_ui(self):
         """Setup the main UI layout"""
@@ -404,7 +421,7 @@ class AITestbedGUI:
                 messagebox.showerror("Error", f"Failed to save prompt: {e}")
     
     def submit_to_models(self):
-        """Submit prompt to selected models"""
+        """Submit prompt to selected models in parallel"""
         # Get prompt text
         prompt = self.prompt_text.get(1.0, tk.END).strip()
         if not prompt:
@@ -431,13 +448,16 @@ class AITestbedGUI:
         # Create output tabs for selected models
         self._create_output_tabs(selected_models)
         
-        # Submit to each model in separate threads
+        # Clear previous futures
+        self.model_futures.clear()
+        
+        # Submit all models to executor in parallel
         for model_name in selected_models:
-            thread = threading.Thread(target=self._submit_to_model_thread, 
-                                     args=(model_name, full_prompt))
-            thread.daemon = True
-            self.model_threads[model_name] = thread
-            thread.start()
+            future = self.executor.submit(self._submit_to_model_worker, model_name, full_prompt)
+            self.model_futures[model_name] = future
+            
+            # Add callback to handle completion
+            future.add_done_callback(lambda f, name=model_name: self._handle_model_completion(f, name))
     
     def _create_output_tabs(self, model_names):
         """Create output tabs for selected models"""
@@ -470,8 +490,8 @@ class AITestbedGUI:
                 'text': text_area
             }
     
-    def _submit_to_model_thread(self, model_name, prompt):
-        """Thread function for submitting to a specific model"""
+    def _submit_to_model_worker(self, model_name, prompt):
+        """Worker function for submitting to a specific model (runs in thread pool)"""
         try:
             # Update status
             self.root.after(0, lambda: self._update_model_status(model_name, "Processing...", "blue"))
@@ -502,10 +522,6 @@ class AITestbedGUI:
         except Exception as e:
             error_msg = f"Error: {str(e)}"
             self.root.after(0, lambda: self._update_model_output(model_name, error_msg, "Error", "red"))
-        
-        finally:
-            # Re-enable submit button when all threads complete
-            self.root.after(0, self._check_all_threads_complete)
     
     def _call_openai_model(self, prompt, model_name, reasoning_effort):
         """Call OpenAI model and capture response"""
@@ -584,12 +600,16 @@ class AITestbedGUI:
             text_area.delete(1.0, tk.END)
             text_area.insert(1.0, response_text)
     
-    def _check_all_threads_complete(self):
-        """Check if all model threads are complete and re-enable submit button"""
-        active_threads = [t for t in self.model_threads.values() if t.is_alive()]
-        if not active_threads:
+    def _handle_model_completion(self, future, model_name):
+        """Handle completion of a model request"""
+        # This runs in the callback thread, so we need to schedule UI updates
+        self.root.after(0, self._check_all_futures_complete)
+    
+    def _check_all_futures_complete(self):
+        """Check if all model futures have completed"""
+        active_futures = [f for f in self.model_futures.values() if not f.done()]
+        if not active_futures:
             self.submit_button.config(state=tk.NORMAL)
-            self.model_threads.clear()
     
     def clear_outputs(self):
         """Clear all model outputs"""
@@ -598,18 +618,19 @@ class AITestbedGUI:
             model_data['status'].config(text="Cleared", foreground="gray")
     
     def stop_all_models(self):
-        """Stop all running model threads (best effort)"""
-        # Note: This is a best effort stop - actual API calls may continue
-        for thread in self.model_threads.values():
-            if hasattr(thread, '_stop'):
-                thread._stop()
+        """Stop all running model requests (preserves completed data)"""
+        # Cancel any pending futures (won't affect already running requests)
+        for model_name, future in self.model_futures.items():
+            if not future.done():
+                future.cancel()
+                # Update status only if still processing
+                if model_name in self.output_tabs:
+                    status_text = self.output_tabs[model_name]['status'].cget('text')
+                    if status_text == "Processing...":
+                        self.output_tabs[model_name]['status'].config(text="Cancelled", foreground="orange")
         
+        # Re-enable submit button
         self.submit_button.config(state=tk.NORMAL)
-        
-        # Update status for all active outputs
-        for model_name, model_data in self.output_tabs.items():
-            if model_data['status'].cget('text') == "Processing...":
-                model_data['status'].config(text="Stopped", foreground="orange")
     
     def check_api_keys(self):
         """Check for API keys file and warn if missing"""
