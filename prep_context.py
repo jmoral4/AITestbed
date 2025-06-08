@@ -4,20 +4,32 @@ import argparse
 import sys
 import re # Using re for more flexible input splitting
 
-def find_cs_files(directory, recursive=False, excluded_dirs=None):
-    """Finds all .cs files in the specified directory.
+def find_files_by_extension(directory, extensions=None, recursive=False, excluded_dirs=None):
+    """Finds all files with specified extensions in the directory.
 
     Args:
         directory (str): The path to the directory to search.
+        extensions (list, optional): List of file extensions to search for (e.g., ['.cs', '.py']).
+                                    Defaults to ['.cs'] if None.
         recursive (bool): Whether to search subdirectories.
         excluded_dirs (list, optional): A list of directory names to exclude.
                                         Defaults to None (no exclusions).
 
     Returns:
-        list: A sorted list of full paths to the found .cs files.
+        list: A sorted list of full paths to the found files.
               Returns an empty list if the directory is invalid.
     """
-    cs_files = []
+    found_files = []
+    if extensions is None:
+        extensions = ['.cs']
+    
+    # Normalize extensions to lowercase and ensure they start with a dot
+    normalized_extensions = []
+    for ext in extensions:
+        ext = ext.lower().strip()
+        if not ext.startswith('.'):
+            ext = '.' + ext
+        normalized_extensions.append(ext)
     if excluded_dirs is None:
         excluded_dirs = []
 
@@ -45,9 +57,10 @@ def find_cs_files(directory, recursive=False, excluded_dirs=None):
 
     if not os.path.isdir(directory):
         print(f"Error: Directory not found or is not a valid directory: {directory}", file=sys.stderr)
-        return cs_files # Return empty list
+        return found_files # Return empty list
 
-    print(f"Searching for .cs files in '{directory}'{' recursively' if recursive else ''}...")
+    ext_display = ', '.join(normalized_extensions)
+    print(f"Searching for files with extensions [{ext_display}] in '{directory}'{' recursively' if recursive else ''}...")
     if normalized_excluded_dirs:
         print(f"Excluding directory names: {', '.join(normalized_excluded_dirs)}")
 
@@ -59,23 +72,25 @@ def find_cs_files(directory, recursive=False, excluded_dirs=None):
             dirs[:] = [d for d in dirs if d.lower() not in normalized_excluded_dirs]
 
             for filename in files:
-                if filename.lower().endswith(".cs"):
+                filename_lower = filename.lower()
+                if any(filename_lower.endswith(ext) for ext in normalized_extensions):
                     full_path = os.path.join(root, filename)
-                    cs_files.append(full_path)
+                    found_files.append(full_path)
     else:
         # Non-recursive search: exclusions apply to subdirectories,
         # so they don't directly affect file listing in the immediate directory.
         try:
             for item in os.listdir(directory):
                 full_path = os.path.join(directory, item)
-                if os.path.isfile(full_path) and item.lower().endswith(".cs"):
-                    cs_files.append(full_path)
+                item_lower = item.lower()
+                if os.path.isfile(full_path) and any(item_lower.endswith(ext) for ext in normalized_extensions):
+                    found_files.append(full_path)
         except OSError as e:
             print(f"Error accessing directory {directory}: {e}", file=sys.stderr)
             return [] # Return empty list on access error
 
-    cs_files.sort() # Sort for consistent ordering
-    return cs_files
+    found_files.sort() # Sort for consistent ordering
+    return found_files
 
 def select_files(file_list, search_directory):
     """Presents the list of files to the user and gets their selection.
@@ -90,10 +105,10 @@ def select_files(file_list, search_directory):
               Returns an empty list if no valid selection is made.
     """
     if not file_list:
-        print("No .cs files found.")
+        print("No files found with specified extensions.")
         return []
 
-    print("\nFound .cs files:")
+    print("\nFound files:")
     for i, f_path in enumerate(file_list):
         try:
             # Display path relative to the initial search directory
@@ -214,10 +229,16 @@ def create_context_file(selected_files, output_filename="prompt_context.txt"):
 
 def main():
     parser = argparse.ArgumentParser(
-        description="Combine C# (.cs) files into a single context file for AI prompts."
+        description="Combine source code files into a single context file for AI prompts."
     )
     parser.add_argument("directory",
-                        help="The directory to search for .cs files.")
+                        help="The directory to search for files.")
+    parser.add_argument("-x", "--extensions",
+                        action="append",
+                        default=[],
+                        metavar="EXT",
+                        help="File extension to include (e.g., .cs, .py, .js). "
+                             "Can be used multiple times. Defaults to .cs if none specified.")
     parser.add_argument("-r", "--recursive",
                         action="store_true",
                         help="Search directories recursively.")
@@ -234,20 +255,23 @@ def main():
 
     # ----------  test hook  ----------
     if len(sys.argv) == 1:                        # no CLI arguments supplied
-        sys.argv.extend([r"C:\git\your_project", "-r", "-e", "obj"])    # <- test values
+        sys.argv.extend([r"C:\git\yourproject", "-r", "-e", "obj", "-x", ".cs"])    # <- test values
     # ---------------------------------
 
     args = parser.parse_args()
 
-    found_files = find_cs_files(args.directory, args.recursive, args.exclude)
+    # Use specified extensions or default to .cs
+    extensions = args.extensions if args.extensions else ['.cs']
+    
+    found_files = find_files_by_extension(args.directory, extensions, args.recursive, args.exclude)
 
     if not found_files:
-        # find_cs_files prints specific errors if directory is invalid.
+        # find_files_by_extension prints specific errors if directory is invalid.
         # If directory is valid but no files found, select_files will handle it.
         if not os.path.isdir(args.directory): # Check if error was due to invalid directory
             sys.exit(1) # Indicate failure
         # Otherwise, it might be that no files matched or all were excluded.
-        # select_files will print "No .cs files found."
+        # select_files will print "No files found with specified extensions."
 
     # Pass args.directory for creating relative paths in the selection prompt
     selected_files_list = select_files(found_files, args.directory)

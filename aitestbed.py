@@ -32,18 +32,22 @@ MODEL_CONFIGS = {
     },
     "o3-mini": {
         "max_tokens": 100000,
+        "context_window": 199000,
         "supports_reasoning": True,
     },
     "o4-mini": {
         "max_tokens": 100000,
+        "context_window": 199000,
         "supports_reasoning": True,
     },
     "o3": {
         "max_tokens": 100000,
+        "context_window": 199000,
         "supports_reasoning": True,
     },
     "o1": {
         "max_tokens": 100000,
+        "context_window": 199000,
         "supports_reasoning": True,
     },
     "claude-3-7-sonnet-latest": {
@@ -473,15 +477,14 @@ class OpenAIConversation:
 
         model_to_use = model or self.model  # Use a different variable name to avoid confusion with the 'model' module
         cfg = get_model_config(model_to_use)
-        ctx_limit = cfg.get("max_tokens", 4096)  # This is context window
+        ctx_limit = cfg.get("context_window", cfg.get("max_tokens", 4096))  # Use context_window if available, fallback to max_tokens
+        max_completion_tokens_from_config = cfg.get("max_tokens", ctx_limit // 4)
 
-        # max_completion_tokens should be what the API call expects
-        # For OpenAI, this is 'max_tokens' in the API call itself.
-        # Let's rename the parameter for clarity or ensure it's used correctly.
-        # Your current code uses `max_completion_tokens` for the API call, which is good.
-        # If `max_completion_tokens` is None, use a heuristic.
-        effective_max_tokens = max_completion_tokens or cfg.get("max_tokens_output",
-                                                                ctx_limit // 4)  # Using a new config field or heuristic
+        # Start with reasonable default for completion tokens
+        if max_completion_tokens is None:
+            effective_max_tokens = min(max_completion_tokens_from_config, ctx_limit // 4)
+        else:
+            effective_max_tokens = max_completion_tokens
 
         full_answer = ""
         follow_up_prompt = "Please continue."
@@ -506,6 +509,27 @@ class OpenAIConversation:
                 effective_max_tokens,  # Use the calculated max tokens for completion
             )
             messages = hist + [{"role": "user", "content": role_user_prompt}]
+            
+            # Final validation of token count
+            total_input_tokens = _count_tokens_messages(messages, model_to_use)
+            available_for_completion = ctx_limit - total_input_tokens
+            
+            # Check for critical context issues
+            if available_for_completion <= 0:
+                raise ValueError(f"🚨 ERROR: Input ({total_input_tokens:,} tokens) exceeds context window ({ctx_limit:,} tokens). Please reduce input size.")
+            elif available_for_completion < 1000:
+                raise ValueError(f"🚨 ERROR: Not enough context for completion. Input: {total_input_tokens:,} tokens, Available: {available_for_completion} tokens (< 1000 tokens)")
+            
+            # Warn about low available context
+            if available_for_completion < 10000:
+                print_colored(f"⚠️  WARNING: Very limited context available! Input: {total_input_tokens:,} tokens, Available: {available_for_completion:,} tokens (< 10k)", RED)
+            
+            # Adjust completion tokens if they exceed available context    
+            if effective_max_tokens > available_for_completion:
+                safety_buffer = max(2000, available_for_completion // 50)  # 2% buffer, min 2000 tokens
+                new_max_tokens = available_for_completion - safety_buffer
+                print_colored(f"⚠️  WARNING: Requested completion tokens ({effective_max_tokens:,}) > available context ({available_for_completion:,}). Reducing to {new_max_tokens:,}.", RED)
+                effective_max_tokens = max(500, new_max_tokens)  # Ensure minimum viable completion size
 
             params = {
                 "model": model_to_use,

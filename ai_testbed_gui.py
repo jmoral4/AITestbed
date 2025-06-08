@@ -107,9 +107,26 @@ class AITestbedGUI:
         ttk.Button(context_frame, text="Browse", command=self.browse_directory).grid(row=0, column=2)
         ttk.Button(context_frame, text="Prepare Context", command=self.prepare_context).grid(row=0, column=3, padx=(5, 0))
         
+        # Options row
+        options_frame = ttk.Frame(context_frame)
+        options_frame.grid(row=1, column=0, columnspan=4, sticky=(tk.W, tk.E), pady=(5, 0))
+        options_frame.columnconfigure(1, weight=1)
+        
+        # File extensions
+        ttk.Label(options_frame, text="Extensions:").grid(row=0, column=0, sticky=tk.W, padx=(0, 5))
+        self.extensions_var = tk.StringVar(value=".cs")
+        extensions_entry = ttk.Entry(options_frame, textvariable=self.extensions_var, width=20)
+        extensions_entry.grid(row=0, column=1, sticky=tk.W, padx=(0, 10))
+        ttk.Label(options_frame, text="(comma-separated)", foreground="gray").grid(row=0, column=2, sticky=tk.W, padx=(0, 10))
+        
+        # Recursive checkbox
+        self.recursive_var = tk.BooleanVar(value=True)
+        recursive_check = ttk.Checkbutton(options_frame, text="Recursive search", variable=self.recursive_var)
+        recursive_check.grid(row=0, column=3, sticky=tk.W)
+        
         # Context display with timestamp
         context_info_frame = ttk.Frame(context_frame)
-        context_info_frame.grid(row=1, column=0, columnspan=4, sticky=(tk.W, tk.E), pady=(10, 0))
+        context_info_frame.grid(row=2, column=0, columnspan=4, sticky=(tk.W, tk.E), pady=(10, 0))
         context_info_frame.columnconfigure(0, weight=1)
         
         ttk.Label(context_info_frame, text="Context Preview:").grid(row=0, column=0, sticky=tk.W)
@@ -278,18 +295,33 @@ class AITestbedGUI:
             # Update status
             self.root.after(0, lambda: self.context_status_label.config(text="Preparing context...", foreground="blue"))
             
-            # Find C# files automatically (simplified version of prep_context)
-            cs_files = prep_context.find_cs_files(self.selected_directory, recursive=True, 
-                                                 excluded_dirs=['obj', 'bin', '.git', '.vs'])
+            # Get extensions from input
+            extensions_text = self.extensions_var.get().strip()
+            if not extensions_text:
+                extensions = ['.cs']  # Default
+            else:
+                extensions = [ext.strip() for ext in extensions_text.split(',') if ext.strip()]
             
-            if not cs_files:
+            # Get recursive setting
+            recursive = self.recursive_var.get()
+            
+            # Find files automatically
+            found_files = prep_context.find_files_by_extension(
+                self.selected_directory, 
+                extensions=extensions,
+                recursive=recursive, 
+                excluded_dirs=['obj', 'bin', '.git', '.vs']
+            )
+            
+            if not found_files:
+                ext_display = ', '.join(extensions)
                 self.root.after(0, lambda: self.context_status_label.config(
-                    text="No .cs files found", foreground="red"))
+                    text=f"No files found with extensions [{ext_display}]", foreground="red"))
                 return
             
             # Create context content
             context_lines = []
-            for file_path in cs_files[:20]:  # Limit to first 20 files to avoid huge context
+            for file_path in found_files:  # Include all files
                 try:
                     filename_header = os.path.basename(file_path)
                     context_lines.append(f"--------------\n{filename_header}\n--------------")
@@ -381,7 +413,7 @@ class AITestbedGUI:
         
         # Attach context if requested
         if self.attach_context_var.get() and self.context_content:
-            full_prompt = f"CONTEXT:\n{self.context_content}\n\nPROMPT:\n{prompt}"
+            full_prompt = f"{prompt}\n\n# CODEBASE\n{self.context_content}"
         else:
             full_prompt = prompt
         
