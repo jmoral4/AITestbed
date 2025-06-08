@@ -30,6 +30,11 @@ MANIFEST
 other/
 prompt_context.txt
 
+# Local launch scripts
+launch_testbed.bat
+launch_gui.vbs
+*.lnk
+
 # Pycharm
 .idea/
 
