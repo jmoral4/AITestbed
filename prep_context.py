@@ -22,7 +22,7 @@ def find_files_by_extension(directory, extensions=None, recursive=False, exclude
     found_files = []
     if extensions is None:
         extensions = ['.cs']
-    
+
     # Normalize extensions to lowercase and ensure they start with a dot
     normalized_extensions = []
     for ext in extensions:
@@ -255,14 +255,14 @@ def main():
 
     # ----------  test hook  ----------
     if len(sys.argv) == 1:                        # no CLI arguments supplied
-        sys.argv.extend([r"C:\git\yourproject", "-r", "-e", "obj", "-x", ".cs"])    # <- test values
+        sys.argv.extend([r"C:\git\yourproj", "-r", "-e", "obj", "-x", ".cs"])    # <- test values
     # ---------------------------------
 
     args = parser.parse_args()
 
     # Use specified extensions or default to .cs
     extensions = args.extensions if args.extensions else ['.cs']
-    
+
     found_files = find_files_by_extension(args.directory, extensions, args.recursive, args.exclude)
 
     if not found_files:
