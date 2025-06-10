@@ -184,11 +184,58 @@ def select_files(file_list, search_directory):
              return []
 
 
-def create_context_file(selected_files, output_filename="prompt_context.txt"):
+def create_context_content(selected_files, search_directory):
+    """Creates context content from selected files as a string.
+
+    Args:
+        selected_files (list): List of full paths to the files to include.
+        search_directory (str): The initial directory that was searched.
+                                Used for displaying relative paths.
+
+    Returns:
+        str: The combined content of all files with headers.
+    """
+    if not selected_files:
+        return ""
+
+    content_lines = []
+    for f_path in selected_files:
+        try:
+            try:
+                relative_path = os.path.relpath(f_path, start=search_directory)
+            except ValueError:
+                relative_path = f_path
+            header = f"--------------\n{relative_path}\n--------------"
+            content_lines.append(header)
+
+            with open(f_path, 'r', encoding='utf-8') as infile:
+                content = infile.read()
+                content_lines.append(content)
+                content_lines.append("")  # Empty line separator
+
+        except FileNotFoundError:
+            print(f"Warning: File not found during reading: {f_path}. Skipping.", file=sys.stderr)
+            content_lines.append(f"Error: File not found - {relative_path}")
+            content_lines.append("")
+        except IOError as e:
+            print(f"Warning: Could not read file {f_path}: {e}. Skipping.", file=sys.stderr)
+            content_lines.append(f"Error reading {relative_path}: {e}")
+            content_lines.append("")
+        except Exception as e:
+            print(f"Warning: An unexpected error occurred processing file {f_path}: {e}. Skipping.", file=sys.stderr)
+            content_lines.append(f"Error processing {relative_path}: {e}")
+            content_lines.append("")
+
+    return "\n".join(content_lines)
+
+
+def create_context_file(selected_files, search_directory, output_filename="prompt_context.txt"):
     """Combines the content of selected files into a single output file.
 
     Args:
         selected_files (list): List of full paths to the files to include.
+        search_directory (str): The initial directory that was searched.
+                                Used for displaying relative paths.
         output_filename (str): The name of the output file.
     """
     if not selected_files:
@@ -196,28 +243,17 @@ def create_context_file(selected_files, output_filename="prompt_context.txt"):
         return
 
     print(f"\nCreating context file: {output_filename}...")
+
+    # Get the context content using the reusable function
+    context_content = create_context_content(selected_files, search_directory)
+
+    if not context_content:
+        print("No content to write. Exiting.")
+        return
+
     try:
         with open(output_filename, 'w', encoding='utf-8') as outfile:
-            for f_path in selected_files:
-                try:
-                    filename_header = os.path.basename(f_path)
-                    header = f"--------------\n{filename_header}\n--------------\n"
-                    outfile.write(header)
-
-                    with open(f_path, 'r', encoding='utf-8') as infile:
-                        content = infile.read()
-                        outfile.write(content)
-                        if not content.endswith('\n'):
-                             outfile.write('\n\n')
-                        else:
-                             outfile.write('\n')
-
-                except FileNotFoundError:
-                    print(f"Warning: File not found during writing: {f_path}. Skipping.", file=sys.stderr)
-                except IOError as e:
-                    print(f"Warning: Could not read file {f_path}: {e}. Skipping.", file=sys.stderr)
-                except Exception as e:
-                     print(f"Warning: An unexpected error occurred processing file {f_path}: {e}. Skipping.", file=sys.stderr)
+            outfile.write(context_content)
 
         print(f"\nSuccessfully created '{output_filename}' with content from {len(selected_files)} file(s).")
 
@@ -277,7 +313,7 @@ def main():
     selected_files_list = select_files(found_files, args.directory)
 
     if selected_files_list:
-        create_context_file(selected_files_list, args.output)
+        create_context_file(selected_files_list, args.directory, args.output)
     else:
         print("No files selected or process cancelled. Output file not created.")
         sys.exit(0) # Indicate successful exit, but nothing done
