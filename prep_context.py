@@ -92,6 +92,31 @@ def find_files_by_extension(directory, extensions=None, recursive=False, exclude
     found_files.sort() # Sort for consistent ordering
     return found_files
 
+def find_files_in_directories(
+        directories: list[str],
+        extensions=None,
+        recursive=False,
+        excluded_dirs=None) -> list[str]:
+    """Finds all files with specified extensions in multiple directories.
+
+    Args:
+        directories (list[str]): List of directory paths to search.
+        extensions (list, optional): List of file extensions to search for (e.g., ['.cs', '.py']).
+                                    Defaults to ['.cs'] if None.
+        recursive (bool): Whether to search subdirectories.
+        excluded_dirs (list, optional): A list of directory names to exclude.
+                                        Defaults to None (no exclusions).
+
+    Returns:
+        list: A sorted list of unique full paths to the found files.
+    """
+    all_files: set[str] = set()
+    for d in directories:
+        files = find_files_by_extension(
+                    d, extensions, recursive, excluded_dirs)
+        all_files.update(files)
+    return sorted(all_files)
+
 def select_files(file_list, search_directory):
     """Presents the list of files to the user and gets their selection.
 
@@ -184,27 +209,49 @@ def select_files(file_list, search_directory):
              return []
 
 
-def create_context_content(selected_files, search_directory):
+def _relative_to_roots(path: str, roots: list[str]) -> str:
+    """Get relative path from a file to the best matching root directory.
+
+    Args:
+        path (str): Absolute or relative path to the file.
+        roots (list[str]): List of root directory paths.
+
+    Returns:
+        str: Relative path with root directory name as prefix,
+             or absolute path as fallback.
+    """
+    abs_path = os.path.abspath(path)
+    for root in roots:
+        try:
+            rel = os.path.relpath(abs_path, start=root)
+            # If rel does not start with '..' we found the right root
+            if not rel.startswith('..'):
+                return os.path.join(os.path.basename(root), rel)
+        except ValueError:
+            pass
+    return abs_path        # fallback – unusual but safe
+
+def create_context_content(selected_files, root_directories):
     """Creates context content from selected files as a string.
 
     Args:
         selected_files (list): List of full paths to the files to include.
-        search_directory (str): The initial directory that was searched.
-                                Used for displaying relative paths.
+        root_directories (list[str] | str): The root directories that were searched,
+                                           or a single directory for backwards compatibility.
+                                           Used for displaying relative paths.
 
     Returns:
         str: The combined content of all files with headers.
     """
+    if isinstance(root_directories, str):
+        root_directories = [root_directories]       # legacy path
     if not selected_files:
         return ""
 
     content_lines = []
     for f_path in selected_files:
         try:
-            try:
-                relative_path = os.path.relpath(f_path, start=search_directory)
-            except ValueError:
-                relative_path = f_path
+            relative_path = _relative_to_roots(f_path, root_directories)
             header = f"--------------\n{relative_path}\n--------------"
             content_lines.append(header)
 
@@ -215,27 +262,31 @@ def create_context_content(selected_files, search_directory):
 
         except FileNotFoundError:
             print(f"Warning: File not found during reading: {f_path}. Skipping.", file=sys.stderr)
+            relative_path = _relative_to_roots(f_path, root_directories)
             content_lines.append(f"Error: File not found - {relative_path}")
             content_lines.append("")
         except IOError as e:
             print(f"Warning: Could not read file {f_path}: {e}. Skipping.", file=sys.stderr)
+            relative_path = _relative_to_roots(f_path, root_directories)
             content_lines.append(f"Error reading {relative_path}: {e}")
             content_lines.append("")
         except Exception as e:
             print(f"Warning: An unexpected error occurred processing file {f_path}: {e}. Skipping.", file=sys.stderr)
+            relative_path = _relative_to_roots(f_path, root_directories)
             content_lines.append(f"Error processing {relative_path}: {e}")
             content_lines.append("")
 
     return "\n".join(content_lines)
 
 
-def create_context_file(selected_files, search_directory, output_filename="prompt_context.txt"):
+def create_context_file(selected_files, root_directories, output_filename="prompt_context.txt"):
     """Combines the content of selected files into a single output file.
 
     Args:
         selected_files (list): List of full paths to the files to include.
-        search_directory (str): The initial directory that was searched.
-                                Used for displaying relative paths.
+        root_directories (list[str] | str): The root directories that were searched,
+                                           or a single directory for backwards compatibility.
+                                           Used for displaying relative paths.
         output_filename (str): The name of the output file.
     """
     if not selected_files:
@@ -245,7 +296,7 @@ def create_context_file(selected_files, search_directory, output_filename="promp
     print(f"\nCreating context file: {output_filename}...")
 
     # Get the context content using the reusable function
-    context_content = create_context_content(selected_files, search_directory)
+    context_content = create_context_content(selected_files, root_directories)
 
     if not context_content:
         print("No content to write. Exiting.")
@@ -267,8 +318,8 @@ def main():
     parser = argparse.ArgumentParser(
         description="Combine source code files into a single context file for AI prompts."
     )
-    parser.add_argument("directory",
-                        help="The directory to search for files.")
+    parser.add_argument("directories", nargs='+',
+                        help="The directories to search for files.")
     parser.add_argument("-x", "--extensions",
                         action="append",
                         default=[],
@@ -299,21 +350,22 @@ def main():
     # Use specified extensions or default to .cs
     extensions = args.extensions if args.extensions else ['.cs']
 
-    found_files = find_files_by_extension(args.directory, extensions, args.recursive, args.exclude)
+    found_files = find_files_in_directories(args.directories, extensions, args.recursive, args.exclude)
 
     if not found_files:
-        # find_files_by_extension prints specific errors if directory is invalid.
-        # If directory is valid but no files found, select_files will handle it.
-        if not os.path.isdir(args.directory): # Check if error was due to invalid directory
+        # find_files_in_directories prints specific errors if directories are invalid.
+        # If directories are valid but no files found, select_files will handle it.
+        invalid_dirs = [d for d in args.directories if not os.path.isdir(d)]
+        if invalid_dirs: # Check if error was due to invalid directories
             sys.exit(1) # Indicate failure
         # Otherwise, it might be that no files matched or all were excluded.
         # select_files will print "No files found with specified extensions."
 
-    # Pass args.directory for creating relative paths in the selection prompt
-    selected_files_list = select_files(found_files, args.directory)
+    # Pass first directory for backward compatibility in selection prompt
+    selected_files_list = select_files(found_files, args.directories[0])
 
     if selected_files_list:
-        create_context_file(selected_files_list, args.directory, args.output)
+        create_context_file(selected_files_list, args.directories, args.output)
     else:
         print("No files selected or process cancelled. Output file not created.")
         sys.exit(0) # Indicate successful exit, but nothing done
