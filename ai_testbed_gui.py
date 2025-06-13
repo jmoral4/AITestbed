@@ -36,7 +36,7 @@ class AITestbedGUI:
         # State variables
         self.context_content = ""
         self.context_timestamp = None
-        self.selected_directory = ""
+        self.selected_directories: list[str] = []
         self.model_conversations = {}
         self.model_futures = {}
 
@@ -117,12 +117,17 @@ class AITestbedGUI:
         context_frame.columnconfigure(1, weight=1)
 
         # Directory selection
-        ttk.Label(context_frame, text="Directory:").grid(row=0, column=0, sticky=tk.W, padx=(0, 5))
-        self.dir_var = tk.StringVar()
-        dir_entry = ttk.Entry(context_frame, textvariable=self.dir_var, state='readonly')
-        dir_entry.grid(row=0, column=1, sticky=(tk.W, tk.E), padx=(0, 5))
+        ttk.Label(context_frame, text="Directories:").grid(row=0, column=0, sticky=tk.W, padx=(0, 5))
+        self.dir_listbox = tk.Listbox(context_frame, height=3, exportselection=False)
+        self.dir_listbox.grid(row=0, column=1, sticky=(tk.W, tk.E), padx=(0, 5))
 
-        ttk.Button(context_frame, text="Browse", command=self.browse_directory).grid(row=0, column=2)
+        # Directory control buttons
+        dir_buttons_frame = ttk.Frame(context_frame)
+        dir_buttons_frame.grid(row=0, column=2, padx=(5, 0))
+        ttk.Button(dir_buttons_frame, text="Add Folder", command=self.add_directory).grid(row=0, column=0, pady=(0, 2))
+        ttk.Button(dir_buttons_frame, text="Remove Selected", command=self.remove_selected_directories).grid(row=1, column=0, pady=(0, 2))
+        ttk.Button(dir_buttons_frame, text="Clear", command=self.clear_directories).grid(row=2, column=0)
+
         ttk.Button(context_frame, text="Prepare Context", command=self.prepare_context).grid(row=0, column=3, padx=(5, 0))
 
         # Options row
@@ -296,17 +301,35 @@ class AITestbedGUI:
         # Initialize output tabs (will be created dynamically)
         self.output_tabs = {}
 
-    def browse_directory(self):
-        """Browse and select directory for context preparation"""
+    def add_directory(self):
+        """Browse and add directory for context preparation"""
         directory = filedialog.askdirectory(title="Select Directory for Context Preparation")
-        if directory:
-            self.selected_directory = directory
-            self.dir_var.set(directory)
+        if directory and directory not in self.selected_directories:
+            self.selected_directories.append(directory)
+            self.dir_listbox.insert(tk.END, directory)
+
+    def remove_selected_directories(self):
+        """Remove selected directories from the list"""
+        selected_indices = self.dir_listbox.curselection()
+        # Remove in reverse order to maintain indices
+        for index in reversed(selected_indices):
+            self.dir_listbox.delete(index)
+            del self.selected_directories[index]
+
+    def clear_directories(self):
+        """Clear all directories from the list"""
+        self.selected_directories.clear()
+        self.dir_listbox.delete(0, tk.END)
+
+    # Backward compatibility alias
+    def browse_directory(self):
+        """Backward compatibility alias for add_directory"""
+        self.add_directory()
 
     def prepare_context(self):
-        """Prepare context from selected directory"""
-        if not self.selected_directory:
-            messagebox.showwarning("No Directory", "Please select a directory first.")
+        """Prepare context from selected directories"""
+        if not self.selected_directories:
+            messagebox.showwarning("No Directories", "Please select at least one directory first.")
             return
 
         # Run context preparation in thread to avoid blocking UI
@@ -330,9 +353,12 @@ class AITestbedGUI:
             # Get recursive setting
             recursive = self.recursive_var.get()
 
-            # Find files automatically
-            found_files = prep_context.find_files_by_extension(
-                self.selected_directory,
+            # Create a copy of directories to avoid modification during iteration
+            dirs = self.selected_directories.copy()
+
+            # Find files automatically using the new multi-directory function
+            found_files = prep_context.find_files_in_directories(
+                dirs,
                 extensions=extensions,
                 recursive=recursive,
                 excluded_dirs=['obj', 'bin', '.git', '.vs']
@@ -344,8 +370,8 @@ class AITestbedGUI:
                     text=f"No files found with extensions [{ext_display}]", foreground="red"))
                 return
 
-            # Create context content using the reusable function
-            self.context_content = prep_context.create_context_content(found_files, self.selected_directory)
+            # Create context content using the reusable function with multiple directories
+            self.context_content = prep_context.create_context_content(found_files, dirs)
             self.context_timestamp = datetime.now()
 
             # Update UI
