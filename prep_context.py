@@ -342,7 +342,7 @@ def main():
 
     # ----------  test hook  ----------
     if len(sys.argv) == 1:                        # no CLI arguments supplied
-        sys.argv.extend([r"C:\git\yourproj", "-r", "-e", "obj", "-x", ".cs"])    # <- test values
+        sys.argv.extend([r"C:\git\pathfinderai", "-r", "-e", "obj", "-x", ".cs"])    # <- test values
     # ---------------------------------
 
     args = parser.parse_args()

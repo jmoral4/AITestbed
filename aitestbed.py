@@ -22,6 +22,28 @@ RESET = "\033[0m"  # Resets the color to default
 # Model configurations
 MODEL_CONFIGS = {
     # OpenAI models
+# All GPT-5 sizes support the Responses API and the `reasoning.effort` control.
+    # The non-reasoning “chat” variant does NOT support reasoning.
+    "gpt-5": {
+        "max_tokens": 100000,              # output ceiling
+        "context_window": 200_000,         # reasonable default (see docs)
+        "supports_reasoning": True,
+    },
+    "gpt-5-mini": {
+        "max_tokens": 100000,
+        "context_window": 200_000,
+        "supports_reasoning": True,
+    },
+    "gpt-5-nano": {
+        "max_tokens": 100000,
+        "context_window": 200_000,
+        "supports_reasoning": True,
+    },
+    "gpt-5-chat-latest": {
+        "max_tokens": 100000,
+        "context_window": 200_000,
+        "supports_reasoning": False,       # chat variant is non-reasoning
+    },
     "gpt-4o": {
         "max_tokens": 16384,
         "supports_reasoning": False,
@@ -61,7 +83,7 @@ MODEL_CONFIGS = {
                         "context_window":200_000,
                         "max_tokens": 64_000,
                         "thinking_enabled": True,
-                        "thinking_budget": 30_000,  # safe default
+                        "thinking_budget": 15_000,  # safe default
                         "max_tokens_with_thinking": 64_000},
     "claude-opus-4-0": {  # Opus is sadly half as useful as sonnet in terms of tokens, despite being smarter :(
                         "context_window":200_000,
@@ -69,11 +91,8 @@ MODEL_CONFIGS = {
                         "thinking_enabled": True,
                         "thinking_budget": 15_000,
                         "max_tokens_with_thinking": 32_000},
-    "gemini-2.5-pro-exp-03-25": {
+    "gemini-2.5-pro": {
         "max_tokens": 65636,
-    },
-    "gemini-2.5-pro-preview-06-05":{
-        "max_tokens": 65636,  # Output tokens
     },
     "gemini-2.5-pro-preview-03-25": {
         "max_tokens": 65636,
@@ -440,20 +459,19 @@ class ClaudeConversation:
         """Return the current conversation history"""
         return self.conversation_history
 
-
 class OpenAIConversation:
     """
-    Conversation wrapper that ¹ never overflows the model context window and ²
-    automatically chains requests when `finish_reason == "length"`.
+    Conversation wrapper that never overflows context and can auto-continue on truncation.
+    Uses Responses API for GPT-5 series; falls back to Chat Completions otherwise.
     """
 
     def __init__(
-        self,
-        api_key: str | None = None,
-        model: str = "o3-mini",
-        reasoning_effort: str | None = "medium",
-        color: str | None = None,
-        max_continue_loops: int = 5,          # ← safety valve
+            self,
+            api_key: str | None = None,
+            model: str = "gpt-5-mini",
+            reasoning_effort: str | None = "medium",  # "minimal" | low | medium | high
+            color: str | None = None,
+            max_continue_loops: int = 5,
     ):
         if api_key:
             self.client = openai.OpenAI(api_key=api_key)
@@ -466,163 +484,178 @@ class OpenAIConversation:
         self.reasoning_effort = reasoning_effort
         self.max_continue_loops = max_continue_loops
 
-    # --------------------------------------------------------------------- #
     def ask(self, prompt: str, model: str | None = None, max_completion_tokens: int | None = None) -> str:
-        """
-        Send `prompt` to the model, streaming the response, trimming history if needed,
-        and automatically issuing “continue” follow-ups when the model hits the length cap.
-        """
         if self.client is None:
             raise ValueError("OpenAI client not initialised.")
 
-        model_to_use = model or self.model  # Use a different variable name to avoid confusion with the 'model' module
+        model_to_use = model or self.model
         cfg = get_model_config(model_to_use)
-        ctx_limit = cfg.get("context_window", cfg.get("max_tokens", 4096))  # Use context_window if available, fallback to max_tokens
+        ctx_limit = cfg.get("context_window", cfg.get("max_tokens", 4096))
         max_completion_tokens_from_config = cfg.get("max_tokens", ctx_limit // 4)
 
-        # Start with reasonable default for completion tokens
-        if max_completion_tokens is None:
-            effective_max_tokens = min(max_completion_tokens_from_config, ctx_limit // 4)
-        else:
-            effective_max_tokens = max_completion_tokens
+        # Respect caller override; otherwise choose a safe slice of the window
+        effective_max_out = (
+            min(max_completion_tokens_from_config, ctx_limit // 4)
+            if max_completion_tokens is None else max_completion_tokens
+        )
 
-        full_answer = ""
+        # Build “fits-in-context” history
+        hist = _shrink_history_to_fit(
+            self.conversation_history.copy(),
+            prompt,
+            model_to_use,
+            ctx_limit,
+            effective_max_out,
+        )
+        messages = hist + [{"role": "user", "content": prompt}]
+
+        # Decide API: Responses for GPT-5 (incl. chat-latest), else Chat Completions
+        use_responses_api = model_to_use.startswith("gpt-5")
+
+        spinner = Halo(text=f'Waiting for response from {model_to_use}...', spinner='dots', color='yellow')
         follow_up_prompt = "Please continue."
         continue_loops = 0
-        role_user_prompt = prompt
-        cumulative_output_tokens = 0  # For debug tracking
-
-        spinner = Halo(  # Add a spinner for OpenAI as well
-            text=f'Waiting for response from {model_to_use}...',
-            spinner='dots',
-            color='yellow'
-        )
+        full_answer = ""
         first_chunk_received = False
 
+        # Helper: reasoning payload for Responses API (GPT-5 reasoning sizes only)
+        def _reasoning_kwargs():
+            if cfg.get("supports_reasoning") and self.reasoning_effort:
+                # GPT-5 supports minimal/low/medium/high via Responses API's `reasoning.effort`
+                return {"reasoning": {"effort": self.reasoning_effort}}
+            return {}
+
         while True:
-            # ---------- build message list that fits -------------------- #
-            hist = _shrink_history_to_fit(
-                self.conversation_history.copy(),
-                role_user_prompt,
-                model_to_use,  # Pass the correct model name
-                ctx_limit,
-                effective_max_tokens,  # Use the calculated max tokens for completion
-            )
-            messages = hist + [{"role": "user", "content": role_user_prompt}]
-            
-            # Final validation of token count
+            # Recompute available space each loop
             total_input_tokens = _count_tokens_messages(messages, model_to_use)
             available_for_completion = ctx_limit - total_input_tokens
-            
-            # Check for critical context issues
             if available_for_completion <= 0:
-                raise ValueError(f"🚨 ERROR: Input ({total_input_tokens:,} tokens) exceeds context window ({ctx_limit:,} tokens). Please reduce input size.")
-            elif available_for_completion < 1000:
-                raise ValueError(f"🚨 ERROR: Not enough context for completion. Input: {total_input_tokens:,} tokens, Available: {available_for_completion} tokens (< 1000 tokens)")
-            
-            # Warn about low available context
-            if available_for_completion < 10000:
-                print_colored(f"⚠️  WARNING: Very limited context available! Input: {total_input_tokens:,} tokens, Available: {available_for_completion:,} tokens (< 10k)", RED)
-            
-            # Adjust completion tokens if they exceed available context    
-            if effective_max_tokens > available_for_completion:
-                safety_buffer = max(2000, available_for_completion // 50)  # 2% buffer, min 2000 tokens
-                new_max_tokens = available_for_completion - safety_buffer
-                print_colored(f"⚠️  WARNING: Requested completion tokens ({effective_max_tokens:,}) > available context ({available_for_completion:,}). Reducing to {new_max_tokens:,}.", RED)
-                effective_max_tokens = max(500, new_max_tokens)  # Ensure minimum viable completion size
+                raise ValueError(
+                    f"🚨 ERROR: Input ({total_input_tokens:,} tokens) exceeds context window ({ctx_limit:,} tokens)."
+                )
+            if available_for_completion < 1000:
+                raise ValueError(
+                    f"🚨 ERROR: Not enough context left for completion ({available_for_completion} tokens < 1000)."
+                )
+            if effective_max_out > available_for_completion:
+                safety_buffer = max(2000, available_for_completion // 50)  # ~2% or min 2k
+                effective_max_out = max(500, available_for_completion - safety_buffer)
+                print_colored(
+                    f"⚠️  WARNING: Reducing max_output_tokens to {effective_max_out:,} due to tight context.",
+                    RED
+                )
 
-            params = {
-                "model": model_to_use,
-                "messages": messages,
-                "max_completion_tokens": effective_max_tokens,  # API param is 'max_tokens' for output limit
-                "stream": True  # <--- ENABLE STREAMING HERE
-            }
-            if cfg.get("supports_reasoning") and self.reasoning_effort:
-                params["reasoning_effort"] = self.reasoning_effort
-
-            if not first_chunk_received:  # Start spinner only for the initial part of a potentially long response
-                spinner.start()
-
-            print(f"Executing:{model_to_use} call with Max_Completion_Tokens:{max_completion_tokens} Streaming:{True} Supports_Reasoning:{self.reasoning_effort} Reasoning_Effort:{self.reasoning_effort}")
             stream_response_content = ""
-            current_finish_reason = None
-            api_usage_stats = None  # To store usage data from the stream if available
+            status = "completed"
+            api_usage_stats = None
 
-            try:
-                response_stream = self.client.chat.completions.create(**params)
-                for chunk in response_stream:
-                    if not first_chunk_received:
-                        spinner.stop()
-                        first_chunk_received = True
-                        if self.color:  # Start color if specified
-                            print(self.color, end="", flush=True)
+            if use_responses_api:
+                # ---------------- Responses API (GPT-5 series) ---------------- #
+                params = {
+                    "model": model_to_use,
+                    "input": messages,  # chat-style message list
+                    "max_output_tokens": effective_max_out
+                }
+                params.update(_reasoning_kwargs())
 
-                    if chunk.choices:
-                        delta = chunk.choices[0].delta
-                        content_piece = delta.content
+                try:
+                    spinner.start()
+                    with self.client.responses.stream(**params) as stream:
+                        for event in stream:
+                            # Text deltas
+                            if event.type == "response.output_text.delta":
+                                if not first_chunk_received:
+                                    spinner.stop()
+                                    first_chunk_received = True
+                                    if self.color:
+                                        print(self.color, end="", flush=True)
+                                print_colored(event.delta, self.color or RESET)
+                                stream_response_content += event.delta
 
-                        if content_piece:
-                            print_colored(content_piece, self.color if self.color else RESET)  # Use RESET if no color
-                            stream_response_content += content_piece
+                            # Completion / Incomplete markers
+                            elif event.type == "response.completed":
+                                pass  # handled after loop via get_final_response()
+                            elif event.type == "response.incomplete":
+                                status = "incomplete"
 
-                        if chunk.choices[0].finish_reason:
-                            current_finish_reason = chunk.choices[0].finish_reason
+                            # Errors
+                            elif event.type == "response.error":
+                                spinner.stop()
+                                raise RuntimeError(getattr(event, "error", "Unknown Responses API error"))
 
-                    # OpenAI often sends usage stats in the last chunk with stream=True
-                    # or in a separate event if using event streams more directly.
-                    # For basic streaming, it might be on the chunk if finish_reason is set.
-                    if hasattr(chunk, 'usage') and chunk.usage:
-                        api_usage_stats = chunk.usage
+                        final = stream.get_final_response()
+                        # Convenience: usage and consistent text access
+                        api_usage_stats = getattr(final, "usage", None)
+                        # If you prefer not to trust deltas, this is the consolidated text:
+                        #   consolidated = final.output_text
+                        # but we already built from deltas in stream_response_content
+                except Exception as e:
+                    spinner.stop()
+                    print_colored(f"\nError during Responses API call: {e}\n", RED)
+                    return f"Error: {e}"
 
+            else:
+                # --------------- Legacy Chat Completions path ----------------- #
+                params = {
+                    "model": model_to_use,
+                    "messages": messages,
+                    "max_completion_tokens": effective_max_out,
+                    "stream": True
+                }
+                if cfg.get("supports_reasoning") and self.reasoning_effort:
+                    # old param name for older o-series if needed
+                    params["reasoning_effort"] = self.reasoning_effort
 
-            except Exception as e:
-                spinner.stop()  # Ensure spinner stops on error
-                print_colored(f"\nError during OpenAI API call: {e}\n", RED)
-                return f"Error: {e}"  # Or handle more gracefully
+                try:
+                    spinner.start()
+                    response_stream = self.client.chat.completions.create(**params)
+                    for chunk in response_stream:
+                        if not first_chunk_received:
+                            spinner.stop()
+                            first_chunk_received = True
+                            if self.color:
+                                print(self.color, end="", flush=True)
 
-            if not first_chunk_received:  # If loop exited before receiving anything (e.g. error before stream)
+                        if chunk.choices:
+                            delta = chunk.choices[0].delta
+                            if delta and delta.content:
+                                print_colored(delta.content, self.color or RESET)
+                                stream_response_content += delta.content
+                            if chunk.choices[0].finish_reason == "length":
+                                status = "incomplete"
+
+                        if hasattr(chunk, 'usage') and chunk.usage:
+                            api_usage_stats = chunk.usage
+
+                except Exception as e:
+                    spinner.stop()
+                    print_colored(f"\nError during OpenAI API call: {e}\n", RED)
+                    return f"Error: {e}"
+
+            if not first_chunk_received:
                 spinner.stop()
 
+            # Save turn
+            self.conversation_history.append({"role": "user", "content": messages[-1]["content"]})
+            self.conversation_history.append({"role": "assistant", "content": stream_response_content})
             full_answer += stream_response_content
 
-            # ---- DEBUG: token counting (adjust for streaming) ---- #
-            part_tokens = count_tokens(stream_response_content, model_to_use)  # Tokenize the streamed part
-            cumulative_output_tokens += part_tokens
-
-            # Try to get completion tokens from usage if available, otherwise estimate
-            api_comp_tok = api_usage_stats.completion_tokens if api_usage_stats and hasattr(api_usage_stats,
-                                                                                            'completion_tokens') else part_tokens
-
-            debug_msg = (
-                f"\n[DEBUG]"
-                f" reason={current_finish_reason}"
-                f" | api_completion_tokens={api_comp_tok}"  # This might be per segment if continued
-                f" | part_tokens_estimated={part_tokens}"
-                f" | cumulative_estimated={cumulative_output_tokens}"
-                f" | ctx_limit={ctx_limit}"
-            )
-            print_colored(debug_msg + "\n", CYAN)
-            # --------------------------------------------------------- #
-
-            self.conversation_history.append({"role": "user", "content": role_user_prompt})
-            self.conversation_history.append(
-                {"role": "assistant", "content": stream_response_content})  # Save the streamed part
-
-            if current_finish_reason != "length":
+            # Auto-continue only if the model ran out of room
+            if status != "incomplete":
                 break
-
             continue_loops += 1
             if continue_loops >= self.max_continue_loops:
                 print_colored("\n[Stopped after max_continue_loops]\n", RED)
                 break
-            role_user_prompt = follow_up_prompt
-            first_chunk_received = False  # Reset for the next part of the conversation if "continue"
 
-        print(RESET)  # Reset color at the very end
+            # Ask to continue, re-build msgs, reset first-chunk flag for the next loop
+            messages = self.conversation_history + [{"role": "user", "content": follow_up_prompt}]
+            first_chunk_received = False
+
+        print(RESET)
         print()
         response_saver.save_response(prompt, full_answer, model_to_use, self.reasoning_effort)
         return full_answer
-    # --------------------------------------------------------------------- #
 
     def reset_conversation(self):
         """Clear the conversation history"""
@@ -924,8 +957,8 @@ def load_prompt_from_file(filename, model="claude-3-7-sonnet-latest"):
     return None
 
 
-def run_openai_query(prompt, api_key=None, model="o4-mini", key_file="apikeys.json", reasoning_effort=None):
-    """Run a query against OpenAI models"""
+def run_openai_query(prompt, api_key=None, model="gpt-5-mini", key_file="apikeys.json", reasoning_effort=None):
+    """Run a query against OpenAI models (GPT-5 series use Responses API)."""
     if not api_key:
         key_manager = APIKeyManager(key_file)
         api_key = key_manager.get_key("openai")
@@ -933,14 +966,20 @@ def run_openai_query(prompt, api_key=None, model="o4-mini", key_file="apikeys.js
             print_colored("Error: No OpenAI API key found\n", RED)
             return
 
-    # Get the model configuration
     config = get_model_config(model)
     max_tokens = config.get("max_tokens", 4096)
 
-    # Only pass reasoning_effort if the model supports it
+    # Only include reasoning for models that support it
     if reasoning_effort is not None and not config.get("supports_reasoning", False):
-        print_colored(f"Note: {model} does not support reasoning_effort. This parameter will be ignored.\n", RED)
+        print_colored(f"Note: {model} does not support reasoning; ignoring reasoning_effort.\n", RED)
         reasoning_effort = None
+
+    # Validate GPT-5’s new “minimal” along with low/medium/high
+    if reasoning_effort is not None:
+        valid = {"minimal", "low", "medium", "high"}
+        if reasoning_effort not in valid:
+            print_colored(f"Note: reasoning_effort must be one of {valid}. Falling back to 'medium'.\n", YELLOW)
+            reasoning_effort = "medium"
 
     openai_chat = OpenAIConversation(api_key, model=model, color=YELLOW, reasoning_effort=reasoning_effort)
     return openai_chat.ask(prompt, max_completion_tokens=max_tokens)
