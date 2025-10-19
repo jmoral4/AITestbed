@@ -152,7 +152,7 @@ def main(argv=None):
 if __name__ == "__main__":
     main([
         "--prompt-file", "prompt.txt",
-        "--openai-models", "gpt-5:medium", "gpt-5-nano:medium",
+        "--openai-models", "gpt-5-nano:medium",   # thinking: {high, medium, low, minimal}
         "--claude-model", "claude-sonnet-4-5",
         "--gemini-model", "gemini-2.5-pro"
     ])
@@ -161,7 +161,7 @@ if __name__ == "__main__":
             # claude-opus-4-1
             # gemini-2.0-flash
             # gemini-2.0-flash-lite (fast and cheap)
-            # gpt-5-chat, gpt-5-mini, gpt-5-nano
+            # gpt-5:high, gpt-5-mini, gpt-5-nano, gpt-5-chat (web version no thinking) {high, medium, low, minimal}
             # o3-mini, o4-mini:high
             # gpt-4o
             # o1

@@ -381,7 +381,8 @@ class ClaudeConversation:
         self.model = "claude-3-7-sonnet-latest"
         self.color = color
 
-    def ask_with_thinking(self, prompt, model=None, max_tokens=None, thinking_budget=None):
+    def ask_with_thinking(self, prompt, model=None, max_tokens=None, thinking_budget=None, enable_web_search=True,
+                          max_searches=5):
         """
         Send a message to Claude with thinking enabled, stream the response, and update conversation history.
 
@@ -390,6 +391,8 @@ class ClaudeConversation:
             model (str, optional): Model to use. Defaults to the instance's model.
             max_tokens (int, optional): Maximum tokens in the response. Defaults to model's config.
             thinking_budget (int, optional): Budget for thinking. Defaults to model's config.
+            enable_web_search (bool, optional): Enable web search tool. Defaults to True.
+            max_searches (int, optional): Maximum number of searches allowed. Defaults to 5.
 
         Returns:
             dict: The complete response from Claude
@@ -397,12 +400,8 @@ class ClaudeConversation:
         if model is None:
             model = self.model
 
-        # Get model configuration
         config = get_model_config(model)
-        # Ensure we never exceed the model’s output ceiling
 
-
-        # Use provided values or fall back to config
         if max_tokens is None:
             if config.get("thinking_enabled", False):
                 max_tokens = config.get("max_tokens_with_thinking", 64_000)
@@ -415,27 +414,45 @@ class ClaudeConversation:
         output_ceiling = config.get("max_tokens", 64_000)
         max_tokens = min(max_tokens, output_ceiling)
 
-        # Create messages array with conversation history plus new prompt
         messages = self.conversation_history + [
             {"role": "user", "content": prompt}
         ]
 
         print(f"MAX TOKENS:{max_tokens}")
+
         # Track the current block type
         current_block = None
         thinking_started = False
         response_started = False
         full_response = ""
+        search_count = 0
 
-        # Only enable thinking if the model supports it
+        # Build the parameters
         thinking_params = {}
         if config.get("thinking_enabled"):
             thinking_params = {
                 "thinking": {"type": "enabled",
-                             "budget_tokens": config.get("thinking_budget", 30_000)}
+                             "budget_tokens": thinking_budget}
             }
-            if config.get("beta_flags"):  # new optional key
+            if config.get("beta_flags"):
                 thinking_params["betas"] = config["beta_flags"]
+
+        # ADD WEB SEARCH TOOL HERE
+        tools = []
+        if enable_web_search:
+            tools.append({
+                "type": "web_search_20250305",  # This is the tool type identifier
+                "name": "web_search",
+                "max_uses": max_searches,
+                # Optional: add user location for localized results
+                # "user_location": {
+                #     "type": "approximate",
+                #     "city": "Sterling",
+                #     "region": "Virginia",
+                #     "country": "US"
+                # }
+            })
+            thinking_params["tools"] = tools
 
         with self.client.beta.messages.stream(
                 model=model,
@@ -447,49 +464,61 @@ class ClaudeConversation:
                 if event.type == "content_block_start":
                     current_block = event.content_block.type
 
-                    # Print the thinking tag when thinking block starts
                     if current_block == "thinking" and not thinking_started:
                         print("<thinking>")
                         thinking_started = True
+                    # NEW: Handle web search tool use
+                    elif current_block == "server_tool_use":
+                        search_count += 1
+                        print_colored(f"\n[Web Search #{search_count}]", CYAN)
 
                 elif event.type == "content_block_delta":
                     if event.delta.type == "thinking_delta":
-                        # Stream thinking content directly (not saved to conversation)
-                        print_colored(event.delta.thinking, CYAN )
-                        #print(event.delta.thinking, end="", flush=True)
+                        print_colored(event.delta.thinking, CYAN)
 
                     elif event.delta.type == "text_delta":
-                        # If we're transitioning from thinking to response
                         if thinking_started and not response_started:
                             print("</thinking>\n")
                             response_started = True
 
-                        # Stream response content directly
                         print_colored(event.delta.text, self.color)
-                        # Also accumulate for conversation history
                         full_response += event.delta.text
+
+                    # NEW: Handle search query streaming
+                    elif event.delta.type == "server_tool_use_delta":
+                        # The search query is being streamed
+                        if hasattr(event.delta, 'input'):
+                            print_colored(f" Query: {event.delta.input}", YELLOW)
 
                 elif event.type == "content_block_stop":
                     if current_block == "thinking" and not response_started:
                         print("</thinking>\n")
-
                     current_block = None
 
+                # NEW: Handle search results
+                elif event.type == "web_search_tool_result":
+                    print_colored(f"\n[Search completed - {len(event.results)} results retrieved]", GREEN)
+                    # Optionally display sources
+                    for i, result in enumerate(event.results[:3], 1):  # Show first 3
+                        if hasattr(result, 'url'):
+                            print_colored(f"  {i}. {result.url}", GREEN)
+
                 elif event.type == "message_delta":
-                    # This captures other message information like stop reason
                     pass
 
                 elif event.type == "message_stop":
-                    # Final event when message is complete
                     pass
 
-        # Update conversation history with the new user prompt and assistant response
         self.conversation_history.append({"role": "user", "content": prompt})
         self.conversation_history.append({"role": "assistant", "content": full_response})
 
         print(RESET)
-        print
-        # Save response to file
+        print()
+
+        if search_count > 0:
+            print_colored(f"\n💰 Cost: ~${(search_count * 0.01):.2f} for {search_count} searches (plus token costs)",
+                          MAGENTA)
+
         response_saver.save_response(prompt, full_response, model)
 
         return full_response
