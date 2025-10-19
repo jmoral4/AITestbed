@@ -83,32 +83,77 @@ class AITestbedGUI:
         """Handle application closing - cleanup thread pool"""
         try:
             # Shutdown the executor
-            self.executor.shutdown(wait=False)
-        except:
+            self.executor.shutdown(wait=False, cancel_futures=True)
+        except Exception:
             pass
         finally:
             self.root.destroy()
 
     def setup_ui(self):
-        """Setup the main UI layout"""
-        # Main container with padding
-        main_frame = ttk.Frame(self.root, padding="10")
-        main_frame.grid(row=0, column=0, sticky=(tk.W, tk.E, tk.N, tk.S))
+        """
+        Setup the main UI layout with a vertical scrollbar to ensure
+        all content is accessible on any screen resolution.
+        """
+        # Configure the root grid to make the canvas expandable
+        self.root.grid_rowconfigure(0, weight=1)
+        self.root.grid_columnconfigure(0, weight=1)
 
-        # Configure root grid weights
-        self.root.columnconfigure(0, weight=1)
-        self.root.rowconfigure(0, weight=1)
-        main_frame.columnconfigure(1, weight=1)
+        # --- Create a canvas and a vertical scrollbar ---
+        canvas = tk.Canvas(self.root)
+        scrollbar = ttk.Scrollbar(self.root, orient="vertical", command=canvas.yview)
+        canvas.configure(yscrollcommand=scrollbar.set)
 
-        # Setup sections
-        self.setup_context_section(main_frame, row=0)
-        self.setup_model_selection(main_frame, row=1)
-        self.setup_prompt_section(main_frame, row=2)
-        self.setup_control_section(main_frame, row=3)
-        self.setup_output_section(main_frame, row=4)
+        # Place canvas and scrollbar in the root window
+        canvas.grid(row=0, column=0, sticky='nsew')
+        scrollbar.grid(row=0, column=1, sticky='ns')
 
-        # Configure main frame grid weights
-        main_frame.rowconfigure(4, weight=1)
+        # --- Create a frame inside the canvas to hold all content ---
+        scrollable_frame = ttk.Frame(canvas, padding="10")
+        scrollable_frame_id = canvas.create_window((0, 0), window=scrollable_frame, anchor="nw")
+
+        # --- Bindings for scrolling and resizing functionality ---
+        def _configure_scroll_region(event):
+            # Update the scroll region to encompass the inner frame's size
+            canvas.configure(scrollregion=canvas.bbox("all"))
+
+        def _configure_frame_width(event):
+            # Update the inner frame's width to fill the canvas
+            canvas.itemconfig(scrollable_frame_id, width=event.width)
+
+        # Bind events to the corresponding functions
+        scrollable_frame.bind("<Configure>", _configure_scroll_region)
+        canvas.bind("<Configure>", _configure_frame_width)
+
+        # --- Add mouse wheel scrolling for user convenience ---
+        def _on_mousewheel(event):
+            # Platform-independent mouse wheel scrolling
+            if sys.platform.startswith('win'):
+                canvas.yview_scroll(int(-1 * (event.delta / 120)), "units")
+            elif sys.platform == 'darwin':  # macOS
+                canvas.yview_scroll(int(-1 * event.delta), "units")
+            else:  # Linux
+                if event.num == 4:
+                    canvas.yview_scroll(-1, "units")
+                elif event.num == 5:
+                    canvas.yview_scroll(1, "units")
+
+        # Bind mouse wheel events to the entire window
+        self.root.bind_all("<MouseWheel>", _on_mousewheel)
+        self.root.bind_all("<Button-4>", _on_mousewheel)
+        self.root.bind_all("<Button-5>", _on_mousewheel)
+
+        # --- Configure the grid layout inside the scrollable frame ---
+        scrollable_frame.columnconfigure(1, weight=1)
+
+        # --- Setup all UI sections into the scrollable frame ---
+        self.setup_context_section(scrollable_frame, row=0)
+        self.setup_model_selection(scrollable_frame, row=1)
+        self.setup_prompt_section(scrollable_frame, row=2)
+        self.setup_control_section(scrollable_frame, row=3)
+        self.setup_output_section(scrollable_frame, row=4)
+
+        # Configure the scrollable frame's grid to allow the output section to expand
+        scrollable_frame.rowconfigure(4, weight=1)
 
     def setup_context_section(self, parent, row):
         """Setup context preparation section"""

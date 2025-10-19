@@ -1,6 +1,7 @@
-anthropic==0.52.1
-google-generativeai==0.8.5
-grpcio-status==1.71.0
-halo==0.0.31
-openai==1.82.1
-tiktoken==0.9.0
+# requirements.txt
+anthropic
+google-generativeai
+grpcio-status
+halo
+openai
+tiktoken
