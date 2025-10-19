@@ -341,8 +341,8 @@ def main():
                              "Can be used multiple times.")
 
     # ----------  test hook  ----------
-    if len(sys.argv) == 1:                        # no CLI arguments supplied
-        sys.argv.extend([r"C:\git\yourproj", "-r", "-e", "obj", "-x", ".cs"])    # <- test values
+    #if len(sys.argv) == 1:                        # no CLI arguments supplied
+     #   sys.argv.extend([r"C:\git\Pathfinder5AI", "-r", "-e", "obj", "-x", ".cs"])    # <- test values
     # ---------------------------------
 
     args = parser.parse_args()

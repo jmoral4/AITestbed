@@ -9,6 +9,7 @@ import google.generativeai as genai
 import datetime
 import re
 import tiktoken
+from openai.types.responses import WebSearchToolParam
 
 # ANSI escape codes for some colors
 RED = "\033[31m"
@@ -19,15 +20,55 @@ MAGENTA = "\033[35m"
 CYAN = "\033[36m"
 RESET = "\033[0m"  # Resets the color to default
 
+RESPONSE_API_MODELS = {
+    "o3-pro": {
+        "max_tokens": 100_000,          # output ceiling
+        "context_window": 200_000,      # input ceiling
+        "supports_reasoning": True,
+    },
+    "o3-deep-research": {    # PRICEY
+        "max_tokens": 100_000,
+        "context_window": 300_000,
+        "supports_reasoning": True,
+        "is_deep_research": True
+    },
+    "gpt-5-chat-latest": {
+        "max_tokens": 128_000,
+        "context_window": 400_000,
+        "supports_reasoning": True,
+    },
+    "gpt-5-nano": {
+        "max_tokens": 128_000,         # max output tokens
+        "context_window": 400_000,     # input ceiling (advertised)
+        "supports_reasoning": True,
+    },
+    "gpt-5": {
+        "max_tokens": 128000,
+        "context_window": 400000,
+        "supports_reasoning": True,
+    },
+    "gpt-5-mini": {
+        "max_tokens": 128000,
+        "context_window": 400000,
+        "supports_reasoning": True,
+    },
+    "gpt-5-pro": {   # PRICEY
+        "max_tokens": 272_000,
+        "context_window": 400_000,
+        "supports_reasoning": True,
+    },
+    "gpt-4.1": {
+        "max_tokens": 32_768,
+        "context_window": 1_047_576,
+        "supports_reasoning": False,
+    }
+}
+
 # Model configurations
 MODEL_CONFIGS = {
     # OpenAI models
     "gpt-4o": {
         "max_tokens": 16384,
-        "supports_reasoning": False,
-    },
-    "gpt-4.1": {
-        "max_tokens": 32768,
         "supports_reasoning": False,
     },
     "o3-mini": {
@@ -69,7 +110,22 @@ MODEL_CONFIGS = {
                         "thinking_enabled": True,
                         "thinking_budget": 15_000,
                         "max_tokens_with_thinking": 32_000},
+    "claude-opus-4-1": {  # Opus is sadly half as useful as sonnet in terms of tokens, despite being smarter :(
+        "context_window": 200_000,
+        "max_tokens": 32_000,
+        "thinking_enabled": True,
+        "thinking_budget": 15_000,
+        "max_tokens_with_thinking": 32_000},
+    "claude-sonnet-4-5": {
+        "context_window": 200_000,
+        "max_tokens": 64_000,
+        "thinking_enabled": True,
+        "thinking_budget": 32_000,
+        "max_tokens_with_thinking": 64_000},
     "gemini-2.5-pro-exp-03-25": {
+        "max_tokens": 65636,
+    },
+    "gemini-2.5-pro": {
         "max_tokens": 65636,
     },
     "gemini-2.5-pro-preview-06-05":{
@@ -98,6 +154,8 @@ MODEL_CONFIGS = {
     },
 }
 
+MODEL_CONFIGS.update(RESPONSE_API_MODELS)
+
 # Default configuration to use when model isn't found
 DEFAULT_CONFIG = {
     "max_tokens": 4096,
@@ -109,6 +167,11 @@ DEFAULT_CONFIG = {
 def get_model_config(model_name):
     """Get the configuration for a specific model, with fallback to defaults"""
     return MODEL_CONFIGS.get(model_name, DEFAULT_CONFIG)
+
+# helpers.py
+def _uses_responses_api(model: str) -> bool:
+    cfg = get_model_config(model)
+    return model in RESPONSE_API_MODELS or cfg.get("is_deep_research", False)
 
 
 def get_available_models():
@@ -476,6 +539,13 @@ class OpenAIConversation:
             raise ValueError("OpenAI client not initialised.")
 
         model_to_use = model or self.model  # Use a different variable name to avoid confusion with the 'model' module
+
+        # NEW: transparently route Requests
+        if _uses_responses_api(model_to_use):
+            return self._ask_via_responses(prompt,
+                                           model=model_to_use,
+                                           max_output_tokens=max_completion_tokens)
+
         cfg = get_model_config(model_to_use)
         ctx_limit = cfg.get("context_window", cfg.get("max_tokens", 4096))  # Use context_window if available, fallback to max_tokens
         max_completion_tokens_from_config = cfg.get("max_tokens", ctx_limit // 4)
@@ -632,6 +702,123 @@ class OpenAIConversation:
     def get_conversation_history(self):
         """Return the current conversation history"""
         return self.conversation_history
+
+    # ─────────────────── NEW STREAMING IMPLEMENTATION ────────────────────
+    def _ask_via_responses(self, prompt: str, *, model: str, max_output_tokens: int | None = None) -> str:
+        cfg = get_model_config(model)
+        ctx_limit = cfg.get("context_window", 200_000)
+        max_output_default = cfg.get("max_tokens", 100_000)
+        max_output = min(max_output_tokens or max_output_default, max_output_default)
+
+        # Build messages and trim to fit context + output
+        messages = self.conversation_history + [{"role": "user", "content": prompt}]
+        needed = _count_tokens_messages(messages, model) + max_output
+        if needed > ctx_limit:
+            messages = _shrink_history_to_fit(self.conversation_history.copy(), prompt, model, ctx_limit, max_output)
+
+        # Responses API accepts input as a list of {role, content}
+        def _to_responses_input(msgs: list[dict]) -> list[dict]:
+            out = []
+            for m in msgs:
+                content = m.get("content", "")
+                if not isinstance(content, str):
+                    content = str(content)
+                out.append({"role": m.get("role", "user"), "content": content})
+            return out
+
+        params = {
+            "model": model,
+            "input": _to_responses_input(messages),
+            "max_output_tokens": max_output,
+        }
+        if cfg.get("supports_reasoning") and self.reasoning_effort:
+            params["reasoning"] = {"effort": self.reasoning_effort}
+
+        uses_gpt5_tools = "gpt-5" in model
+        if uses_gpt5_tools:
+            search_tool = WebSearchToolParam(
+                type="web_search_preview",
+                user_location={
+                    "type": "approximate",
+                    "country": "US",
+                },
+            )
+            params["tools"] = [search_tool]
+            params["tool_choice"] = "auto"
+
+        spinner = Halo(text=f"Waiting for {model} via /responses …", spinner="dots", color="yellow")
+        spinner.start()
+
+        full_text = ""
+        stop_reason = None
+        search_sources: list[str] = []
+        try:
+            # Correct streaming API usage
+            with self.client.responses.stream(**params) as stream:
+                first_chunk = False
+                for event in stream:
+                    # Stream the text deltas
+                    if event.type == "response.output_text.delta":
+                        if not first_chunk:
+                            spinner.stop()
+                            first_chunk = True
+                        chunk = event.delta or ""
+                        print_colored(chunk, self.color or RESET)
+                        full_text += chunk
+
+                    # Optional: surface errors
+                    elif event.type == "response.error":
+                        spinner.stop()
+                        err = getattr(event, "error", "Unknown responses error")
+                        print_colored(f"\n/responses error: {err}\n", RED)
+                        return f"Error: {err}"
+                    elif uses_gpt5_tools and event.type == "response.tool_call.delta":
+                        # Tool calls stream metadata; collect without interrupting text flow.
+                        delta = getattr(event, "delta", None)
+                        if delta and isinstance(delta, dict):
+                            action = delta.get("action")
+                            if action and isinstance(action, dict):
+                                sources = action.get("sources")
+                                if sources and isinstance(sources, list):
+                                    search_sources.extend(str(src) for src in sources)
+
+                # Final response contains metadata (usage, stop_reason, etc.)
+                final = stream.get_final_response()
+                stop_reason = getattr(final, "stop_reason", None)
+                if uses_gpt5_tools:
+                    for item in getattr(final, "output", []):
+                        if getattr(item, "type", None) == "web_search_call":
+                            action = getattr(item, "action", None)
+                            sources = getattr(action, "sources", None)
+                            if sources and isinstance(sources, list):
+                                search_sources.extend(str(src) for src in sources)
+
+        except Exception as e:
+            spinner.stop()
+            print_colored(f"\n/responses error: {e}\n", RED)
+            return f"Error: {e}"
+
+        # Update history and save to file
+        self.conversation_history += [
+            {"role": "user", "content": prompt},
+            {"role": "assistant", "content": full_text},
+        ]
+
+        print(RESET)
+        print()
+        if uses_gpt5_tools and search_sources:
+            deduped = []
+            seen = set()
+            for src in search_sources:
+                if src not in seen:
+                    deduped.append(src)
+                    seen.add(src)
+            print_colored("Search sources:", CYAN)
+            for src in deduped:
+                print_colored(f"- {src}", CYAN)
+            print()
+        response_saver.save_response(prompt, full_text, model, self.reasoning_effort)
+        return full_text
 
 
 class OllamaConversation:
@@ -857,8 +1044,55 @@ class GeminiConversation:
             # Add the new prompt to conversation history for tracking
             self.conversation_history.append({"role": "user", "content": prompt})
 
-            # Send the message and get the response
-            response = self.chat_session.send_message(
+            # Helper: safely extract textual content from a chunk/response without triggering
+            # the library's quick accessor exception when no valid Part exists.
+            def _safe_extract_text(obj):
+                # 1. Try .text but swallow the known "quick accessor" exception
+                try:
+                    t = getattr(obj, "text", None)
+                    if t:  # non-empty string
+                        return t
+                except Exception:
+                    pass  # fall through to manual extraction
+
+                # 2. Look for candidates -> content -> parts
+                # Streaming partials often expose .candidates with partial content
+                try:
+                    cands = getattr(obj, "candidates", None)
+                    if cands:
+                        out_fragments = []
+                        for cand in cands:
+                            content = getattr(cand, "content", None)
+                            if not content:
+                                continue
+                            parts = getattr(content, "parts", None)
+                            if parts:
+                                for p in parts:
+                                    # Newer SDK: each part may have a 'text' attribute; else str(part)
+                                    txt = getattr(p, "text", None)
+                                    if txt:
+                                        out_fragments.append(txt)
+                                    else:
+                                        out_fragments.append(str(p))
+                        if out_fragments:
+                            return "".join(out_fragments)
+                except Exception:
+                    pass
+
+                # 3. Direct parts attribute
+                try:
+                    parts = getattr(obj, "parts", None)
+                    if parts:
+                        return "".join(
+                            getattr(p, "text", None) or str(p) for p in parts
+                        )
+                except Exception:
+                    pass
+
+                return ""  # Nothing extracted
+
+            # Send the message and stream the response
+            response_stream = self.chat_session.send_message(
                 prompt,
                 stream=True,
                 generation_config={
@@ -867,17 +1101,48 @@ class GeminiConversation:
             )
 
             full_response = ""
-            for chunk in response:
-                # Different versions of the API might return different objects
-                if hasattr(chunk, "text"):
-                    text = chunk.text
-                elif hasattr(chunk, "parts") and len(chunk.parts) > 0:
-                    text = str(chunk.parts[0])
-                else:
-                    text = str(chunk)
+            had_any_text = False
+            last_finish_reason = None
+            for chunk in response_stream:
+                # Some chunk objects may expose metadata (finish_reason) without text
+                # We collect text defensively.
+                text = _safe_extract_text(chunk)
+                if text:
+                    had_any_text = True
+                    print_colored(text, self.color)
+                    full_response += text
+                # Try to capture finish reason if available (naming differs across SDK versions)
+                try:
+                    if hasattr(chunk, "candidates") and chunk.candidates:
+                        fr = getattr(chunk.candidates[0], "finish_reason", None) or getattr(chunk.candidates[0], "finishReason", None)
+                        if fr is not None:
+                            last_finish_reason = fr
+                except Exception:
+                    pass
 
-                print_colored(text, self.color)
-                full_response += text
+            # If no text surfaced during streaming but finish_reason indicates a normal stop,
+            # attempt a non-stream fallback single-shot call (without streaming) to recover content.
+            if not had_any_text:
+                try:
+                    fallback = self.chat_session.send_message(
+                        prompt,
+                        stream=False,
+                        generation_config={
+                            "max_output_tokens": max_tokens
+                        }
+                    )
+                    recovered = _safe_extract_text(fallback)
+                    if recovered:
+                        full_response = recovered
+                        had_any_text = True
+                        print_colored(full_response, self.color)
+                    else:
+                        # Provide a diagnostic string so caller/logs show context
+                        full_response = f"[No textual content returned by Gemini; finish_reason={last_finish_reason}]"
+                except Exception as fe:
+                    diag = f"[Gemini streaming produced no text and fallback failed: {fe}]"
+                    print_colored(diag, RED)
+                    full_response = diag
 
             # Add the response to conversation history for tracking
             self.conversation_history.append({"role": "assistant", "content": full_response})

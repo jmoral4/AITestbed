@@ -114,7 +114,7 @@ This will:
 This mode launches separate windows/tabs for each model, allowing you to see responses develop in parallel.
 
 ```bash
-python concurrent_ai_test.py --prompt-file "prompt.txt" --openai-model "gpt-4o" --claude-model "claude-3-7-sonnet-latest" --ollama-model "llama3.1" --gemini-model "gemini-2.0-flash"
+python concurrent_ai.py --prompt-file "prompt.txt" --openai-model "gpt-4o" --claude-model "claude-3-7-sonnet-latest" --ollama-model "llama3.1" --gemini-model "gemini-2.0-flash"
 ```
 
 Arguments:

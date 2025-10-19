@@ -1,4 +1,4 @@
-# concurrent_ai_test.py  •  spawn separate windows for multiple AI models
+# concurrent_ai.py  •  spawn separate windows for multiple AI models
 import subprocess
 import sys
 import os
@@ -150,20 +150,20 @@ def main(argv=None):
 
 
 if __name__ == "__main__":
-    # Example call: three OpenAI variants + Claude + Gemini
     main([
         "--prompt-file", "prompt.txt",
-        "--openai-models","o4-mini:high", "o3:high",
-        "--claude-model", "claude-opus-4-0",
-        "--gemini-model", "gemini-2.5-pro-preview-06-05"
+        "--openai-models", "gpt-5:medium", "gpt-5-nano:medium",
+        "--claude-model", "claude-sonnet-4-5",
+        "--gemini-model", "gemini-2.5-pro"
     ])
 
             # Other Options
-            # gemini-2.5-pro-exp-03-25
+            # claude-opus-4-1
             # gemini-2.0-flash
             # gemini-2.0-flash-lite (fast and cheap)
-            # o3-mini
+            # gpt-5-chat, gpt-5-mini, gpt-5-nano
+            # o3-mini, o4-mini:high
             # gpt-4o
             # o1
             # claude-3-5-haiku-latest (small and fast)
-            #claude-sonnet-4-20250514
+            # claude-sonnet-4-20250514
