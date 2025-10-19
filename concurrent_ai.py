@@ -152,7 +152,7 @@ def main(argv=None):
 if __name__ == "__main__":
     main([
         "--prompt-file", "prompt.txt",
-        "--openai-models", "gpt-5-nano:medium",   # thinking: {high, medium, low, minimal}
+        "--openai-models", "gpt-5-mini:medium",   # thinking: {high, medium, low, minimal}
         "--claude-model", "claude-sonnet-4-5",
         "--gemini-model", "gemini-2.5-pro"
     ])

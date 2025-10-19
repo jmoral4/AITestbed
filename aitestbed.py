@@ -5,7 +5,17 @@ import requests
 from halo import Halo
 import json
 from pathlib import Path
-import google.generativeai as genai
+try:
+    from google import genai as google_genai_client
+    from google.genai import types as google_genai_types
+except ImportError:
+    google_genai_client = None
+    google_genai_types = None
+
+try:
+    import google.generativeai as legacy_genai
+except ImportError:
+    legacy_genai = None
 import datetime
 import re
 import tiktoken
@@ -124,18 +134,23 @@ MODEL_CONFIGS = {
         "max_tokens_with_thinking": 64_000},
     "gemini-2.5-pro-exp-03-25": {
         "max_tokens": 65636,
+        "supports_web_search": True,
     },
     "gemini-2.5-pro": {
         "max_tokens": 65636,
+        "supports_web_search": True,
     },
     "gemini-2.5-pro-preview-06-05":{
         "max_tokens": 65636,  # Output tokens
+        "supports_web_search": True,
     },
     "gemini-2.5-pro-preview-03-25": {
         "max_tokens": 65636,
+        "supports_web_search": True,
     },
     "gemini-2.5-pro-preview-05-06":{
         "max_tokens": 65636,
+        "supports_web_search": True,
     },
     "gemini-2.0-flash": {
         "max_tokens": 8192,
@@ -426,6 +441,7 @@ class ClaudeConversation:
         response_started = False
         full_response = ""
         search_count = 0
+        current_tool_payload = ""
 
         # Build the parameters
         thinking_params = {}
@@ -471,6 +487,7 @@ class ClaudeConversation:
                     elif current_block == "server_tool_use":
                         search_count += 1
                         print_colored(f"\n[Web Search #{search_count}]", CYAN)
+                        current_tool_payload = ""
 
                 elif event.type == "content_block_delta":
                     if event.delta.type == "thinking_delta":
@@ -485,23 +502,47 @@ class ClaudeConversation:
                         full_response += event.delta.text
 
                     # NEW: Handle search query streaming
-                    elif event.delta.type == "server_tool_use_delta":
-                        # The search query is being streamed
-                        if hasattr(event.delta, 'input'):
-                            print_colored(f" Query: {event.delta.input}", YELLOW)
+                    elif event.delta.type in ("server_tool_use_delta", "input_json_delta"):
+                        partial = getattr(event.delta, "partial_json", None) or getattr(event.delta, "input", None)
+                        if partial:
+                            current_tool_payload += partial
 
                 elif event.type == "content_block_stop":
+                    previous_block = current_block
                     if current_block == "thinking" and not response_started:
                         print("</thinking>\n")
                     current_block = None
+                    if previous_block == "server_tool_use" and current_tool_payload:
+                        try:
+                            payload_data = json.loads(current_tool_payload)
+                        except json.JSONDecodeError:
+                            payload_data = {"query": current_tool_payload}
+                        query_text = (
+                            payload_data.get("query")
+                            if isinstance(payload_data, dict)
+                            else payload_data
+                        )
+                        if not query_text and isinstance(payload_data, dict):
+                            query_text = payload_data.get("input")
+                        if query_text:
+                            print_colored(f" Query: {query_text}\n", YELLOW)
+                        current_tool_payload = ""
 
                 # NEW: Handle search results
                 elif event.type == "web_search_tool_result":
-                    print_colored(f"\n[Search completed - {len(event.results)} results retrieved]", GREEN)
-                    # Optionally display sources
-                    for i, result in enumerate(event.results[:3], 1):  # Show first 3
-                        if hasattr(result, 'url'):
-                            print_colored(f"  {i}. {result.url}", GREEN)
+                    results = getattr(event, "content", None) or getattr(event, "results", None) or []
+                    results_list = list(results)
+                    print_colored(f"\n[Search completed - {len(results_list)} results retrieved]\n", GREEN)
+                    for i, result in enumerate(results_list, 1):
+                        url = getattr(result, "url", None) or getattr(result, "uri", None)
+                        title = getattr(result, "title", None) or url
+                        snippet = getattr(result, "snippet", None) or getattr(result, "text", None)
+                        if title:
+                            print_colored(f"  {i}. {title}\n", GREEN)
+                        if url:
+                            print_colored(f"     {url}\n", GREEN)
+                        if snippet:
+                            print_colored(f"     {snippet}\n", GREEN)
 
                 elif event.type == "message_delta":
                     pass
@@ -1023,26 +1064,234 @@ class GeminiConversation:
             model (str, optional): The model to use. Defaults to "gemini-1.5-pro".
             color (str, optional): ANSI color for output. Defaults to None.
         """
+        self.color = color
+        self.model = model
+        self.conversation_history = []
+        self.using_new_sdk = False
+        self.client = None
+        self.genai_types = None
+        self.legacy_genai = None
+        self.model_instance = None
+        self.chat_session = None
+
         try:
-
-            self.genai = genai
-
-            self.genai.configure(api_key=api_key)
-            self.model = model
-            self.color = color
-            self.model_instance = self.genai.GenerativeModel(model)
-            self.chat_session = self.model_instance.start_chat(history=[])
-            self.conversation_history = []
-        except ImportError:
-            print_colored(
-                "Error: google-generativeai package not installed. Please install it with 'pip install google-generativeai'",
-                RED)
-            raise
+            if google_genai_client and google_genai_types:
+                # New google-genai SDK (supports tools like Google Search)
+                self.using_new_sdk = True
+                self.client = google_genai_client.Client(api_key=api_key)
+                self.genai_types = google_genai_types
+            elif legacy_genai:
+                # Fallback to legacy google-generativeai SDK
+                self.using_new_sdk = False
+                self.legacy_genai = legacy_genai
+                self.legacy_genai.configure(api_key=api_key)
+                self.model_instance = self.legacy_genai.GenerativeModel(model)
+                self.chat_session = self.model_instance.start_chat(history=[])
+            else:
+                raise ImportError(
+                    "google-genai (or legacy google-generativeai) package not installed. "
+                    "Install with 'pip install google-genai' or 'pip install google-generativeai'."
+                )
         except Exception as e:
             print_colored(f"Error initializing Gemini: {str(e)}", RED)
             raise
 
     def ask(self, prompt, model=None, max_tokens=None):
+        """
+        Dispatch Gemini requests to the appropriate SDK implementation (new google-genai or legacy).
+        """
+        target_model = model or self.model
+        if target_model != self.model:
+            self.model = target_model
+            # Switching models resets conversation state to avoid mixing contexts
+            self.conversation_history = []
+            if not self.using_new_sdk:
+                self.model_instance = self.legacy_genai.GenerativeModel(target_model)
+                self.chat_session = self.model_instance.start_chat(history=[])
+
+        config = get_model_config(target_model)
+        if max_tokens is None:
+            max_tokens = config.get("max_tokens", 8192)
+
+        print(f"MAX TOKENS:{max_tokens}")
+
+        if self.using_new_sdk:
+            return self._ask_with_new_sdk(prompt, target_model, max_tokens, config)
+
+        return self._ask_with_legacy_sdk(prompt, target_model, max_tokens)
+
+    def _supports_google_search(self, model_name: str, config: dict) -> bool:
+        """
+        Determine whether the current Gemini model should invoke the Google Search grounding tool.
+        """
+        return bool(config.get("supports_web_search", False) and google_genai_types)
+
+    def _build_contents_for_new_sdk(self, history: list[dict]) -> list:
+        """
+        Convert internal conversation history into google-genai Content objects.
+        """
+        contents = []
+        if not self.genai_types:
+            return contents
+
+        for message in history:
+            text = message.get("content", "")
+            if not text:
+                continue
+            role = message.get("role", "user")
+            # google-genai expects 'model' instead of 'assistant'
+            sdk_role = "model" if role == "assistant" else "user"
+            try:
+                part = self.genai_types.Part.from_text(text=text)
+            except (AttributeError, TypeError):
+                part = self.genai_types.Part(text=text)
+            contents.append(
+                self.genai_types.Content(
+                    role=sdk_role,
+                    parts=[part]
+                )
+            )
+        return contents
+
+    def _ask_with_new_sdk(self, prompt: str, model: str, max_tokens: int, config: dict) -> str:
+        """
+        Handle Gemini requests via the new google-genai SDK with optional Google Search grounding.
+        """
+        history = self.conversation_history + [{"role": "user", "content": prompt}]
+        contents = self._build_contents_for_new_sdk(history)
+
+        generate_kwargs = {"max_output_tokens": max_tokens}
+        if self._supports_google_search(model, config):
+            generate_kwargs["tools"] = [
+                self.genai_types.Tool(
+                    google_search=self.genai_types.GoogleSearch()
+                )
+            ]
+
+        generate_config = self.genai_types.GenerateContentConfig(**generate_kwargs)
+
+        spinner = Halo(
+            text=f"Waiting for {model} via google-genai…",
+            spinner="dots",
+            color="yellow"
+        )
+        spinner.start()
+
+        full_response = ""
+        started_stream = False
+        final_chunk = None
+        resolved_response = None
+
+        try:
+            stream = self.client.models.generate_content_stream(
+                model=model,
+                contents=contents,
+                config=generate_config,
+            )
+            for chunk in stream:
+                final_chunk = chunk
+                text = getattr(chunk, "text", None)
+                if text:
+                    if not started_stream:
+                        spinner.stop()
+                        started_stream = True
+                    print_colored(text, self.color or RESET)
+                    full_response += text
+            # Attempt to capture the resolved response for metadata/citations.
+            resolved_response = getattr(stream, "response", None)
+            if resolved_response is None:
+                result_attr = getattr(stream, "result", None)
+                if callable(result_attr):
+                    try:
+                        resolved_response = result_attr()
+                    except Exception:
+                        resolved_response = None
+                elif result_attr is not None:
+                    resolved_response = result_attr
+        except Exception as e:
+            spinner.stop()
+            error_msg = f"Gemini API error: {str(e)}"
+            print_colored(error_msg, RED)
+            return error_msg
+        finally:
+            spinner.stop()
+
+        if not full_response:
+            full_response = "[No textual content returned by Gemini]"
+
+        # Update history and surface grounding metadata
+        self.conversation_history.append({"role": "user", "content": prompt})
+        self.conversation_history.append({"role": "assistant", "content": full_response})
+
+        print(RESET)
+        print()
+
+        if self._supports_google_search(model, config):
+            metadata_source = resolved_response or final_chunk
+            if metadata_source:
+                self._render_grounding_metadata(metadata_source)
+
+        response_saver.save_response(prompt, full_response, model)
+        return full_response
+
+    def _render_grounding_metadata(self, response_chunk) -> None:
+        """
+        Pretty-print Google Search grounding metadata (queries, sources, entry point) if available.
+        """
+        candidates = getattr(response_chunk, "candidates", None)
+        if not candidates:
+            return
+
+        candidate = candidates[0]
+
+        grounding_metadata = (
+            getattr(candidate, "grounding_metadata", None)
+            or getattr(candidate, "groundingMetadata", None)
+        )
+        if not grounding_metadata:
+            return
+
+        queries = getattr(grounding_metadata, "web_search_queries", None) or getattr(
+            grounding_metadata, "webSearchQueries", None
+        )
+        if queries:
+            print_colored("Search queries:\n", CYAN)
+            for query in queries:
+                query_text = getattr(query, "text", None) or getattr(query, "query", None) or str(query)
+                if query_text:
+                    print_colored(f"- {query_text}\n", CYAN)
+
+        chunks = getattr(grounding_metadata, "grounding_chunks", None) or getattr(
+            grounding_metadata, "groundingChunks", None
+        )
+        if chunks:
+            print_colored("Search sources:\n", CYAN)
+            seen = set()
+            index = 1
+            for chunk in chunks:
+                web = getattr(chunk, "web", None)
+                if not web:
+                    continue
+                uri = getattr(web, "uri", None) or getattr(web, "url", None)
+                if not uri or uri in seen:
+                    continue
+                seen.add(uri)
+                title = getattr(web, "title", None) or uri
+                print_colored(f"{index}. {title} — {uri}\n", CYAN)
+                index += 1
+
+        entry_point = getattr(grounding_metadata, "search_entry_point", None) or getattr(
+            grounding_metadata, "searchEntryPoint", None
+        )
+        if entry_point:
+            rendered = getattr(entry_point, "rendered_content", None) or getattr(
+                entry_point, "renderedContent", None
+            )
+            if rendered:
+                print_colored("Search entry point (HTML):\n", CYAN)
+                print(rendered)
+
+    def _ask_with_legacy_sdk(self, prompt, model=None, max_tokens=None):
         """
         Send a message to Gemini, stream the response, and update conversation history
 
@@ -1057,7 +1306,7 @@ class GeminiConversation:
         try:
             if model and model != self.model:
                 self.model = model
-                self.model_instance = self.genai.GenerativeModel(model)
+                self.model_instance = self.legacy_genai.GenerativeModel(model)
                 # Create a new chat session for the new model
                 self.chat_session = self.model_instance.start_chat(history=[])
                 # Note: This loses conversation history when changing models
@@ -1068,8 +1317,6 @@ class GeminiConversation:
             # Use provided max_tokens or fall back to config
             if max_tokens is None:
                 max_tokens = config.get("max_tokens", 8192)
-
-            print(f"MAX TOKENS:{max_tokens}")
             # Add the new prompt to conversation history for tracking
             self.conversation_history.append({"role": "user", "content": prompt})
 
@@ -1188,9 +1435,13 @@ class GeminiConversation:
             return error_msg
 
     def reset_conversation(self):
-        """Clear the conversation history by starting a new chat session"""
-        self.chat_session = self.model_instance.start_chat(history=[])
+        """Clear the conversation history by starting a new chat session (legacy) or wiping state (new SDK)."""
         self.conversation_history = []
+        if self.using_new_sdk:
+            print("Conversation history has been reset.")
+            return
+
+        self.chat_session = self.model_instance.start_chat(history=[])
         print("Conversation history has been reset.")
 
     def get_conversation_history(self):

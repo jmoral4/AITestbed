@@ -1,5 +1,6 @@
 # requirements.txt
 anthropic
+google-genai
 google-generativeai
 grpcio-status
 halo
