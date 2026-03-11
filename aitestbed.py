@@ -66,7 +66,7 @@ RESPONSE_API_MODELS = {
     },
     "gpt-5.2": {
         "max_tokens": 128000,
-        "context_window": 400000,
+        "context_window": 400_000,
         "supports_reasoning": True,
     },
     "gpt-5.2-pro": {
@@ -76,7 +76,7 @@ RESPONSE_API_MODELS = {
     },
     "gpt-5.4": {
         "max_tokens": 128_000,
-        "context_window": 1_000_000,
+        "context_window": 1_000_000,   
         "supports_reasoning": True,
     },
     "gpt-5.4-pro": {
