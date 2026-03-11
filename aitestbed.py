@@ -76,7 +76,7 @@ RESPONSE_API_MODELS = {
     },
     "gpt-5.4": {
         "max_tokens": 128_000,
-        "context_window": 1_000_000,   
+        "context_window": 1_000_000,
         "supports_reasoning": True,
     },
     "gpt-5.4-pro": {
@@ -166,6 +166,13 @@ MODEL_CONFIGS = {
         "thinking_enabled": True,
         "thinking_budget": 15_000,
         "max_tokens_with_thinking": 32_000,
+        "beta_flags": ["context-1m-2025-08-07"]},
+    "claude-haiku-4-5": {
+        "context_window": 1_000_000,  # 1M with beta flag
+        "max_tokens": 64_000,
+        "thinking_enabled": True,
+        "thinking_budget": 32_000,
+        "max_tokens_with_thinking": 64_000,
         "beta_flags": ["context-1m-2025-08-07"]},
     "claude-sonnet-4-6": {
         "context_window": 1_000_000,  # 1M with beta flag

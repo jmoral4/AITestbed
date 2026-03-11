@@ -195,8 +195,8 @@ def main(argv=None):
 if __name__ == "__main__":
     main([
         "--prompt-file", "prompt.txt",
-        "--openai-models", "gpt-5.4:high", "gpt-5.2:high", # thinking: {high, medium, low, minimal} - multiple models
-        "--claude-models", "claude-opus-4-6", "claude-sonnet-4-6",
+        "--openai-models", "gpt-5.4:high", "gpt-5.2:medium", # thinking: {high, medium, low, minimal} - multiple models
+        "--claude-models", "claude-haiku-4-5", "claude-sonnet-4-6",
         "--gemini-models", "gemini-3.1-pro-preview", "gemini-3.1-flash-lite-preview",
         "--grok-models", "grok-4-1-fast-reasoning",
     ])
