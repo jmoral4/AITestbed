@@ -7,7 +7,7 @@ import os
 
 def main():
     parser = argparse.ArgumentParser(description='Run a single AI model query')
-    parser.add_argument('--model', required=True, choices=['openai', 'claude', 'ollama', 'gemini'],
+    parser.add_argument('--model', required=True, choices=['openai', 'claude', 'ollama', 'gemini', 'grok'],
                         help='Which AI model to use')
     parser.add_argument('--prompt-file', help='File containing the prompt')
     parser.add_argument('--system-prompt-file', help='File containing the system prompt (for Ollama)')
@@ -46,7 +46,7 @@ def main():
 
     # Check for API keys
     try:
-        if args.model == 'openai' or args.model == 'claude' or args.model == 'gemini':
+        if args.model == 'openai' or args.model == 'claude' or args.model == 'gemini' or args.model == 'grok':
             # Look for apikeys.json in the script directory first
             script_dir = os.path.dirname(os.path.abspath(__file__))
             api_keys_path = os.path.join(script_dir, 'apikeys.json')
@@ -69,13 +69,13 @@ def main():
     # Run the appropriate model
     try:
         if args.model == 'openai':
-            model_name = args.model_name if args.model_name else "o3-mini"
+            model_name = args.model_name if args.model_name else "gpt-5.4"
             reasoning_text = f" Reasoning: {args.reasoning_effort}" if args.reasoning_effort is not None else ""
             print(f"=== OPENAI RESPONSE ({model_name}){reasoning_text} ===")
             aitestbed.run_openai_query(prompt, model=model_name, reasoning_effort=args.reasoning_effort)
 
         elif args.model == 'claude':
-            model_name = args.model_name if args.model_name else "claude-3-7-sonnet-latest"
+            model_name = args.model_name if args.model_name else "claude-sonnet-4-6"
             print(f"=== CLAUDE RESPONSE ({model_name}) ===")
             aitestbed.run_claude_query(prompt, model=model_name)
 
@@ -85,9 +85,14 @@ def main():
             aitestbed.run_ollama_query(prompt, model=model_name, system_prompt=system_prompt)
 
         elif args.model == 'gemini':
-            model_name = args.model_name if args.model_name else "gemini-2.0-flash"
+            model_name = args.model_name if args.model_name else "gemini-2.5-flash"
             print(f"=== GEMINI RESPONSE ({model_name}) ===")
             aitestbed.run_gemini_query(prompt, model=model_name)
+
+        elif args.model == 'grok':
+            model_name = args.model_name if args.model_name else "grok-4-1-fast-reasoning"
+            print(f"=== GROK RESPONSE ({model_name}) ===")
+            aitestbed.run_grok_query(prompt, model=model_name)
 
     except Exception as e:
         print(f"Error running {args.model} query: {e}")

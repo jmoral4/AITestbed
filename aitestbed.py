@@ -30,6 +30,8 @@ MAGENTA = "\033[35m"
 CYAN = "\033[36m"
 RESET = "\033[0m"  # Resets the color to default
 
+XAI_BASE_URL = "https://api.x.ai/v1"
+
 RESPONSE_API_MODELS = {
     "o3-pro": {
         "max_tokens": 100_000,          # output ceiling
@@ -55,6 +57,31 @@ RESPONSE_API_MODELS = {
     "gpt-5": {
         "max_tokens": 128000,
         "context_window": 400000,
+        "supports_reasoning": True,
+    },
+    "gpt-5.1": {
+        "max_tokens": 128000,
+        "context_window": 400000,
+        "supports_reasoning": True,
+    },
+    "gpt-5.2": {
+        "max_tokens": 128000,
+        "context_window": 400000,
+        "supports_reasoning": True,
+    },
+    "gpt-5.2-pro": {
+        "max_tokens": 128000,
+        "context_window": 400000,
+        "supports_reasoning": True,
+    },
+    "gpt-5.4": {
+        "max_tokens": 128_000,
+        "context_window": 1_000_000,
+        "supports_reasoning": True,
+    },
+    "gpt-5.4-pro": {
+        "max_tokens": 128000,
+        "context_window": 1_000_000,
         "supports_reasoning": True,
     },
     "gpt-5-mini": {
@@ -106,14 +133,15 @@ MODEL_CONFIGS = {
         "thinking_enabled": True,
         "thinking_budget": 32000,
         "max_tokens_with_thinking": 128000,
-        "beta_flags":"output-128k-2025-02-19"
+        "beta_flags": ["output-128k-2025-02-19"]
     },
     "claude-sonnet-4-0": {
-                        "context_window":200_000,
+                        "context_window": 1_000_000,  # 1M with beta flag
                         "max_tokens": 64_000,
                         "thinking_enabled": True,
                         "thinking_budget": 30_000,  # safe default
-                        "max_tokens_with_thinking": 64_000},
+                        "max_tokens_with_thinking": 64_000,
+                        "beta_flags": ["context-1m-2025-08-07"]},
     "claude-opus-4-0": {  # Opus is sadly half as useful as sonnet in terms of tokens, despite being smarter :(
                         "context_window":200_000,
                         "max_tokens": 32_000,
@@ -126,12 +154,33 @@ MODEL_CONFIGS = {
         "thinking_enabled": True,
         "thinking_budget": 15_000,
         "max_tokens_with_thinking": 32_000},
-    "claude-sonnet-4-5": {
+    "claude-opus-4-5": {  # Opus is sadly half as useful as sonnet in terms of tokens, despite being smarter :(
         "context_window": 200_000,
+        "max_tokens": 32_000,
+        "thinking_enabled": True,
+        "thinking_budget": 15_000,
+        "max_tokens_with_thinking": 32_000},
+    "claude-opus-4-6": {  # Opus is sadly half as useful as sonnet in terms of tokens, despite being smarter :(
+        "context_window": 200_000,
+        "max_tokens": 32_000,
+        "thinking_enabled": True,
+        "thinking_budget": 15_000,
+        "max_tokens_with_thinking": 32_000,
+        "beta_flags": ["context-1m-2025-08-07"]},
+    "claude-sonnet-4-6": {
+        "context_window": 1_000_000,  # 1M with beta flag
         "max_tokens": 64_000,
         "thinking_enabled": True,
         "thinking_budget": 32_000,
-        "max_tokens_with_thinking": 64_000},
+        "max_tokens_with_thinking": 64_000,
+        "beta_flags": ["context-1m-2025-08-07"]},
+    "claude-sonnet-4-5": {
+        "context_window": 1_000_000,  # 1M with beta flag
+        "max_tokens": 64_000,
+        "thinking_enabled": True,
+        "thinking_budget": 32_000,
+        "max_tokens_with_thinking": 64_000,
+        "beta_flags": ["context-1m-2025-08-07"]},
     "gemini-2.5-pro-exp-03-25": {
         "max_tokens": 65636,
         "supports_web_search": True,
@@ -152,6 +201,26 @@ MODEL_CONFIGS = {
         "max_tokens": 65636,
         "supports_web_search": True,
     },
+    "gemini-3-pro-preview": {
+        "max_tokens": 65636,
+        "supports_web_search": True,
+    },
+    "gemini-3.1-pro-preview": {
+        "max_tokens": 65636,
+        "supports_web_search": True,
+    },
+    "gemini-3-flash-preview": {
+        "max_tokens": 65636,
+        "supports_web_search": True,
+    },
+    "gemini-3.1-flash-lite-preview": {
+        "max_tokens": 65636,
+        "supports_web_search": True,
+    },
+    "gemini-2.5-flash": {
+        "max_tokens": 65636,
+        "supports_web_search": True,
+    },
     "gemini-2.0-flash": {
         "max_tokens": 8192,
     },
@@ -160,6 +229,49 @@ MODEL_CONFIGS = {
     },
     "gemini-2.0-pro": {
         "max_tokens": 16384,
+    },
+    # xAI Grok models (OpenAI-compatible endpoint at XAI_BASE_URL)
+    "grok-4-latest": {
+        "max_tokens": 16_000,
+        "context_window": 256_000,
+        "supports_reasoning": False,
+        "supports_web_search": True,
+        "xai_live_search": False,
+    },
+    "grok-4-1-fast-reasoning": {
+        "max_tokens": 16_000,
+        "context_window": 2_000_000,
+        "supports_reasoning": True,
+        "supports_web_search": True,
+        "xai_live_search": False,
+    },
+    "grok-4-1-fast-non-reasoning": {
+        "max_tokens": 16_000,
+        "context_window": 2_000_000,
+        "supports_reasoning": False,
+        "supports_web_search": True,
+        "xai_live_search": False,
+    },
+    "grok-4-fast-reasoning": {
+        "max_tokens": 16_000,
+        "context_window": 2_000_000,
+        "supports_reasoning": False,
+        "supports_web_search": True,
+        "xai_live_search": False,
+    },
+    "grok-4-fast-non-reasoning": {
+        "max_tokens": 16_000,
+        "context_window": 2_000_000,
+        "supports_reasoning": False,
+        "supports_web_search": True,
+        "xai_live_search": False,
+    },
+    "grok-code-fast-1": {
+        "max_tokens": 16_000,
+        "context_window": 256_000,
+        "supports_reasoning": False,
+        "supports_web_search": True,
+        "xai_live_search": False,
     },
     "llama3.1": {
         "max_tokens": 4096,
@@ -178,6 +290,9 @@ DEFAULT_CONFIG = {
     "thinking_enabled": False,
 }
 
+# Allow extra time for slower-thinking models like GPT-5-Pro before timing out.
+OPENAI_REQUEST_TIMEOUT = 900  # seconds
+
 
 def get_model_config(model_name):
     """Get the configuration for a specific model, with fallback to defaults"""
@@ -195,6 +310,7 @@ def get_available_models():
         "OpenAI": [],
         "Claude": [],
         "Gemini": [],
+        "Grok": [],
         "Ollama": []
     }
     
@@ -215,6 +331,8 @@ def get_available_models():
             models_by_provider["Claude"].append(model_info)
         elif model_name.startswith("gemini-"):
             models_by_provider["Gemini"].append(model_info)
+        elif model_name.startswith("grok-"):
+            models_by_provider["Grok"].append(model_info)
         else:
             models_by_provider["Ollama"].append(model_info)
     
@@ -429,6 +547,18 @@ class ClaudeConversation:
         output_ceiling = config.get("max_tokens", 64_000)
         max_tokens = min(max_tokens, output_ceiling)
 
+        if config.get("thinking_enabled") and thinking_budget is not None:
+            # Claude requires max_tokens to exceed thinking budget; clamp if needed.
+            if max_tokens is not None and thinking_budget >= max_tokens:
+                original_budget = thinking_budget
+                adjusted_budget = max(max_tokens - 1, 1)
+                if adjusted_budget < original_budget:
+                    print_colored(
+                        f"Adjusted thinking budget to {adjusted_budget} to satisfy max_tokens>{original_budget} requirement.",
+                        YELLOW,
+                    )
+                thinking_budget = adjusted_budget
+
         messages = self.conversation_history + [
             {"role": "user", "content": prompt}
         ]
@@ -451,7 +581,11 @@ class ClaudeConversation:
                              "budget_tokens": thinking_budget}
             }
             if config.get("beta_flags"):
-                thinking_params["betas"] = config["beta_flags"]
+                # Ensure beta_flags is a list
+                beta_flags = config["beta_flags"]
+                if isinstance(beta_flags, str):
+                    beta_flags = [beta_flags]
+                thinking_params["betas"] = beta_flags
 
         # ADD WEB SEARCH TOOL HERE
         tools = []
@@ -587,9 +721,13 @@ class OpenAIConversation:
         reasoning_effort: str | None = "medium",
         color: str | None = None,
         max_continue_loops: int = 5,          # ← safety valve
+        base_url: str | None = None,
     ):
         if api_key:
-            self.client = openai.OpenAI(api_key=api_key)
+            client_kwargs = {"api_key": api_key, "timeout": OPENAI_REQUEST_TIMEOUT}
+            if base_url:
+                client_kwargs["base_url"] = base_url
+            self.client = openai.OpenAI(**client_kwargs)
         else:
             self.client = None
             print("ERROR: No OpenAI API key provided.")
@@ -598,6 +736,7 @@ class OpenAIConversation:
         self.color = color
         self.reasoning_effort = reasoning_effort
         self.max_continue_loops = max_continue_loops
+        self.base_url = base_url
 
     # --------------------------------------------------------------------- #
     def ask(self, prompt: str, model: str | None = None, max_completion_tokens: int | None = None) -> str:
@@ -631,6 +770,8 @@ class OpenAIConversation:
         continue_loops = 0
         role_user_prompt = prompt
         cumulative_output_tokens = 0  # For debug tracking
+        web_search_invocations = 0
+        tool_arg_fragments: dict[str, str] = {}
 
         spinner = Halo(  # Add a spinner for OpenAI as well
             text=f'Waiting for response from {model_to_use}...',
@@ -671,6 +812,13 @@ class OpenAIConversation:
                 print_colored(f"⚠️  WARNING: Requested completion tokens ({effective_max_tokens:,}) > available context ({available_for_completion:,}). Reducing to {new_max_tokens:,}.", RED)
                 effective_max_tokens = max(500, new_max_tokens)  # Ensure minimum viable completion size
 
+            enable_xai_web = (
+                cfg.get("supports_web_search", False)
+                and cfg.get("xai_live_search", False)
+                and self.base_url
+                and "x.ai" in self.base_url
+            )
+
             params = {
                 "model": model_to_use,
                 "messages": messages,
@@ -679,6 +827,13 @@ class OpenAIConversation:
             }
             if cfg.get("supports_reasoning") and self.reasoning_effort:
                 params["reasoning_effort"] = self.reasoning_effort
+            if enable_xai_web:
+                # Enable xAI's live search injection (no client-side tools).
+                params["extra_body"] = {
+                    "search_parameters": {
+                        "mode": "auto"
+                    }
+                }
 
             if not first_chunk_received:  # Start spinner only for the initial part of a potentially long response
                 spinner.start()
@@ -704,6 +859,40 @@ class OpenAIConversation:
                         if content_piece:
                             print_colored(content_piece, self.color if self.color else RESET)  # Use RESET if no color
                             stream_response_content += content_piece
+
+                        tool_calls = getattr(delta, "tool_calls", None)
+                        if tool_calls:
+                            for tc in tool_calls:
+                                tc_type = getattr(tc, "type", None)
+                                func = getattr(tc, "function", None)
+                                func_name = getattr(func, "name", None) if func else None
+                                is_search_call = tc_type in ("web_search", "live_search") or func_name in (
+                                    "web_search",
+                                    "live_search",
+                                )
+                                if is_search_call:
+                                    # Each tool call streams its arguments; accumulate to extract the query.
+                                    call_id = getattr(tc, "id", None) or f"web_search_{web_search_invocations + 1}"
+                                    if call_id not in tool_arg_fragments:
+                                        web_search_invocations += 1
+                                        tool_arg_fragments[call_id] = ""
+                                        print_colored(f"\n[Web Search #{web_search_invocations}]\n", CYAN)
+                                    arg_fragment = getattr(func, "arguments", None) if func else None
+                                    if arg_fragment:
+                                        tool_arg_fragments[call_id] += arg_fragment
+                                        query_text = None
+                                        try:
+                                            parsed = json.loads(tool_arg_fragments[call_id])
+                                            if isinstance(parsed, dict):
+                                                query_text = (
+                                                    parsed.get("query")
+                                                    or parsed.get("q")
+                                                    or parsed.get("search")
+                                                )
+                                        except json.JSONDecodeError:
+                                            query_text = tool_arg_fragments[call_id]
+                                        if query_text:
+                                            print_colored(f" Query: {query_text}\n", YELLOW)
 
                         if chunk.choices[0].finish_reason:
                             current_finish_reason = chunk.choices[0].finish_reason
@@ -758,6 +947,9 @@ class OpenAIConversation:
             role_user_prompt = follow_up_prompt
             first_chunk_received = False  # Reset for the next part of the conversation if "continue"
 
+        if web_search_invocations > 0:
+            print_colored(f"\n[Web search: {web_search_invocations} request(s) dispatched]\n", CYAN)
+
         print(RESET)  # Reset color at the very end
         print()
         response_saver.save_response(prompt, full_answer, model_to_use, self.reasoning_effort)
@@ -780,11 +972,34 @@ class OpenAIConversation:
         max_output_default = cfg.get("max_tokens", 100_000)
         max_output = min(max_output_tokens or max_output_default, max_output_default)
 
-        # Build messages and trim to fit context + output
-        messages = self.conversation_history + [{"role": "user", "content": prompt}]
+        # Build messages and trim history to fit context + output.
+        # Always preserve the current user prompt.
+        new_user_message = {"role": "user", "content": prompt}
+        messages = self.conversation_history + [new_user_message]
         needed = _count_tokens_messages(messages, model) + max_output
         if needed > ctx_limit:
-            messages = _shrink_history_to_fit(self.conversation_history.copy(), prompt, model, ctx_limit, max_output)
+            trimmed_history = _shrink_history_to_fit(
+                self.conversation_history.copy(),
+                prompt,
+                model,
+                ctx_limit,
+                max_output,
+            )
+            messages = trimmed_history + [new_user_message]
+            needed = _count_tokens_messages(messages, model) + max_output
+            if needed > ctx_limit:
+                input_tokens = _count_tokens_messages(messages, model)
+                prompt_tokens = count_tokens(prompt, model)
+                err_msg = (
+                    f"🚨 ERROR: Context overflow for {model}. "
+                    f"Prompt={prompt_tokens:,} tokens, "
+                    f"Input(after trim)={input_tokens:,}, "
+                    f"Requested output={max_output:,}, "
+                    f"Context window={ctx_limit:,}. "
+                    "Reduce prompt/history or lower max_output_tokens."
+                )
+                print_colored(err_msg + "\n", RED)
+                return f"Error: {err_msg}"
 
         # Responses API accepts input as a list of {role, content}
         def _to_responses_input(msgs: list[dict]) -> list[dict]:
@@ -796,18 +1011,35 @@ class OpenAIConversation:
                 out.append({"role": m.get("role", "user"), "content": content})
             return out
 
+        responses_input = _to_responses_input(messages)
+        if not responses_input:
+            err_msg = "🚨 ERROR: No input messages available for /responses request."
+            print_colored(err_msg + "\n", RED)
+            return f"Error: {err_msg}"
+
         params = {
             "model": model,
-            "input": _to_responses_input(messages),
+            "input": responses_input,
             "max_output_tokens": max_output,
         }
         if cfg.get("supports_reasoning") and self.reasoning_effort:
             params["reasoning"] = {"effort": self.reasoning_effort}
 
         uses_gpt5_tools = "gpt-5" in model
+        attach_web_tool = False
         if uses_gpt5_tools:
+            effort_level = (self.reasoning_effort or "").lower()
+            if effort_level == "minimal":
+                print_colored(
+                    "Skipping web search tool because reasoning_effort 'minimal' disallows tool use.",
+                    YELLOW,
+                )
+            else:
+                attach_web_tool = True
+
+        if attach_web_tool:
             search_tool = WebSearchToolParam(
-                type="web_search_preview",
+                type="web_search",
                 user_location={
                     "type": "approximate",
                     "country": "US",
@@ -842,7 +1074,7 @@ class OpenAIConversation:
                         err = getattr(event, "error", "Unknown responses error")
                         print_colored(f"\n/responses error: {err}\n", RED)
                         return f"Error: {err}"
-                    elif uses_gpt5_tools and event.type == "response.tool_call.delta":
+                    elif attach_web_tool and event.type == "response.tool_call.delta":
                         # Tool calls stream metadata; collect without interrupting text flow.
                         delta = getattr(event, "delta", None)
                         if delta and isinstance(delta, dict):
@@ -855,7 +1087,7 @@ class OpenAIConversation:
                 # Final response contains metadata (usage, stop_reason, etc.)
                 final = stream.get_final_response()
                 stop_reason = getattr(final, "stop_reason", None)
-                if uses_gpt5_tools:
+                if attach_web_tool:
                     for item in getattr(final, "output", []):
                         if getattr(item, "type", None) == "web_search_call":
                             action = getattr(item, "action", None)
@@ -876,7 +1108,7 @@ class OpenAIConversation:
 
         print(RESET)
         print()
-        if uses_gpt5_tools and search_sources:
+        if attach_web_tool and search_sources:
             deduped = []
             seen = set()
             for src in search_sources:
@@ -1469,7 +1701,7 @@ def load_prompt_from_file(filename, model="claude-3-7-sonnet-latest"):
     return None
 
 
-def run_openai_query(prompt, api_key=None, model="o4-mini", key_file="apikeys.json", reasoning_effort=None):
+def run_openai_query(prompt, api_key=None, model="gpt-5.4", key_file="apikeys.json", reasoning_effort=None):
     """Run a query against OpenAI models"""
     if not api_key:
         key_manager = APIKeyManager(key_file)
@@ -1491,7 +1723,7 @@ def run_openai_query(prompt, api_key=None, model="o4-mini", key_file="apikeys.js
     return openai_chat.ask(prompt, max_completion_tokens=max_tokens)
 
 
-def run_claude_query(prompt, api_key=None, model="claude-3-7-sonnet-latest", key_file="apikeys.json"):
+def run_claude_query(prompt, api_key=None, model="claude-sonnet-4-6", key_file="apikeys.json"):
     """Run a query against Claude models with thinking enabled"""
     if not api_key:
         key_manager = APIKeyManager(key_file)
@@ -1533,6 +1765,36 @@ def run_gemini_query(prompt, api_key=None, model="gemini-2.5-flash", key_file="a
     except Exception as e:
         print_colored(f"Error initializing Gemini: {str(e)}\n", RED)
         return None
+
+
+def run_grok_query(prompt, api_key=None, model="grok-4-1-fast-reasoning", key_file="apikeys.json"):
+    """Run a query against xAI Grok models via the OpenAI-compatible API."""
+    if not api_key:
+        # Environment variables take precedence for convenience
+        api_key = os.getenv("XAI_API_KEY") or os.getenv("GROK_API_KEY")
+        if not api_key:
+            key_manager = APIKeyManager(key_file)
+            # Accept multiple common key labels
+            api_key = (
+                key_manager.get_key("xai")
+                or key_manager.get_key("grok")
+                or key_manager.get_key("xai/grok")
+            )
+        if not api_key:
+            print_colored("Error: No xAI (Grok) API key found\n", RED)
+            return
+
+    config = get_model_config(model)
+    max_tokens = config.get("max_tokens", 16_000)
+
+    grok_chat = OpenAIConversation(
+        api_key,
+        model=model,
+        color=GREEN,
+        reasoning_effort=None,
+        base_url=XAI_BASE_URL,
+    )
+    return grok_chat.ask(prompt, max_completion_tokens=max_tokens)
 
 
 def run_ollama_query(prompt, model="llama3.1", system_prompt=None):
@@ -1607,6 +1869,11 @@ def main():
     if key_manager.get_key("gemini"):
         print_colored("\n=== GEMINI RESPONSE ===\n", YELLOW)
         run_gemini_query(q)
+
+    # Ask Grok (xAI)
+    if key_manager.get_key("xai") or key_manager.get_key("grok") or os.getenv("XAI_API_KEY") or os.getenv("GROK_API_KEY"):
+        print_colored("\n=== GROK RESPONSE ===\n", GREEN)
+        run_grok_query(q)
 
     # #Ask Ollama
     # print_colored("\n=== OLLAMA RESPONSE ===\n", GREEN)

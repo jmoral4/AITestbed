@@ -85,9 +85,19 @@ def main(argv=None):
                    help='Reasoning effort for the legacy single model')
 
     # Other vendors (unchanged)
-    p.add_argument('--claude-model', default='claude-3-7-sonnet-latest')
+    p.add_argument('--claude-models', nargs='*',
+                   help='Space/comma list of Claude model names')
+    p.add_argument('--claude-model', default='claude-3-7-sonnet-latest',
+                   help='Single Claude model (legacy)')
     p.add_argument('--ollama-model', default='llama3.1')
-    p.add_argument('--gemini-model', default='gemini-2.0-flash')
+    p.add_argument('--gemini-models', nargs='*',
+                   help='Space/comma list of Gemini model names')
+    p.add_argument('--gemini-model', default='gemini-2.0-flash',
+                   help='Single Gemini model (legacy)')
+    p.add_argument('--grok-models', nargs='*',
+                   help='Space/comma list of xAI Grok model names')
+    p.add_argument('--grok-model', default='grok-4',
+                   help='Single Grok model (legacy)')
 
     args = p.parse_args(argv)
 
@@ -122,11 +132,39 @@ def main(argv=None):
 
     # ───────────────────────────── assemble other vendor commands
 
-    claude_cmd = (f'{python_exe} "{runner_py}" --model claude '
-                  f'--model-name {args.claude_model} {prompt_arg} --wait')
+    def parse_model_list(tokens, fallback):
+        """Expand a space/comma separated list of model names."""
+        if not tokens:
+            return [fallback] if fallback else []
+        names = []
+        for token in tokens:
+            for raw in token.split(','):
+                name = raw.strip()
+                if name:
+                    names.append(name)
+        return names
 
-    gemini_cmd = (f'{python_exe} "{runner_py}" --model gemini '
-                  f'--model-name {args.gemini_model} {prompt_arg} --wait')
+    claude_models = parse_model_list(args.claude_models, args.claude_model)
+    gemini_models = parse_model_list(args.gemini_models, args.gemini_model)
+    grok_models = parse_model_list(args.grok_models, args.grok_model)
+
+    claude_cmds = []
+    for model_name in claude_models:
+        cmd = (f'{python_exe} "{runner_py}" --model claude '
+               f'--model-name {model_name} {prompt_arg} --wait')
+        claude_cmds.append((model_name, cmd))
+
+    gemini_cmds = []
+    for model_name in gemini_models:
+        cmd = (f'{python_exe} "{runner_py}" --model gemini '
+               f'--model-name {model_name} {prompt_arg} --wait')
+        gemini_cmds.append((model_name, cmd))
+
+    grok_cmds = []
+    for model_name in grok_models:
+        cmd = (f'{python_exe} "{runner_py}" --model grok '
+               f'--model-name {model_name} {prompt_arg} --wait')
+        grok_cmds.append((model_name, cmd))
 
     # ollama_cmd = (f'{python_exe} "{runner_py}" --model ollama '
     #               f'--model-name {args.ollama_model} {prompt_arg} '
@@ -136,13 +174,18 @@ def main(argv=None):
     # ───────────────────────────── spawn windows
 
     print(f"🔹 Using prompt: {prompt_path}")
-    first = True
-    for mdl, cmd in openai_cmds:
-        run_in_windows_terminal(f"OpenAI ({mdl})", cmd, script_dir, first)
-        first = False
+    launch_specs = []
+    launch_specs.extend((f"OpenAI ({mdl})", cmd) for mdl, cmd in openai_cmds)
+    launch_specs.extend((f"Claude ({mdl})", cmd) for mdl, cmd in claude_cmds)
+    launch_specs.extend((f"Gemini ({mdl})", cmd) for mdl, cmd in gemini_cmds)
+    launch_specs.extend((f"Grok ({mdl})", cmd) for mdl, cmd in grok_cmds)
 
-    run_in_windows_terminal(f"Claude ({args.claude_model})", claude_cmd, script_dir, first)
-    run_in_windows_terminal(f"Gemini ({args.gemini_model})", gemini_cmd, script_dir)
+    if not launch_specs:
+        print("⚠️  No models specified. Nothing to launch.")
+        return
+
+    for index, (title, cmd) in enumerate(launch_specs):
+        run_in_windows_terminal(title, cmd, script_dir, first=(index == 0))
     # Uncomment if you want Ollama as well
     # run_in_windows_terminal(f"Ollama ({args.ollama_model})", ollama_cmd, script_dir)
 
@@ -152,13 +195,15 @@ def main(argv=None):
 if __name__ == "__main__":
     main([
         "--prompt-file", "prompt.txt",
-        "--openai-models", "gpt-5-mini:medium",   # thinking: {high, medium, low, minimal}
-        "--claude-model", "claude-sonnet-4-5",
-        "--gemini-model", "gemini-2.5-pro"
+        "--openai-models", "gpt-5.4:high", # thinking: {high, medium, low, minimal}
+        "--claude-models", "claude-opus-4-6",
+        "--gemini-models", "gemini-3.1-pro-preview",
+        "--grok-models", "grok-4-1-fast-reasoning",
     ])
 
             # Other Options
             # claude-opus-4-1
+            # "gemini-2.5-pro",
             # gemini-2.0-flash
             # gemini-2.0-flash-lite (fast and cheap)
             # gpt-5:high, gpt-5-mini, gpt-5-nano, gpt-5-chat (web version no thinking) {high, medium, low, minimal}
